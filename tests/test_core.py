@@ -129,6 +129,7 @@ def test_parameter_promotion_rechecks_convexity():
 def test_infeasible_unbounded_and_solver_incompatible():
     result = solve(build_problem(scalar("x", ["x >= 1", "x <= 0"])))
     assert result["status"] == "infeasible"
+    assert all(c["dual"] is None for c in result["constraints"])
     assert result["optimal_value"] is None
     assert result["variables"]["x"] is None
     result = solve(build_problem(scalar("x")))
@@ -199,3 +200,40 @@ def test_inaccurate_result_keeps_warning(monkeypatch):
     result = solve(built)
     assert not result["verified_optimal"]
     assert result["status"] == "optimal_inaccurate"
+
+
+@pytest.mark.parametrize("field,value", [("domain", []), ("name", ["x"]), ("meaning", 10), ("units", {}), ("shape", None)])
+def test_malformed_declarations_are_friendly_errors(field, value):
+    spec = scalar()
+    spec["variables"][0][field] = value
+    with pytest.raises(ProblemError):
+        build_problem(spec)
+
+
+@pytest.mark.parametrize("constraint", ["0 < x", "0 <= x <= 1", "x != 0", "x", "x == __import__('os')"])
+def test_invalid_constraint_language(constraint):
+    with pytest.raises(ProblemError):
+        build_problem(scalar(constraints=[constraint]))
+
+
+def test_free_sign_coefficient_explains_parameter_domain():
+    spec = scalar("p * square(x)")
+    spec["parameters"] = [{"name": "p", "value": 2, "domain": "free"}]
+    assert not build_problem(spec).problem.is_dcp()
+    spec["parameters"][0]["domain"] = "nonneg"
+    assert build_problem(spec).problem.is_dcp()
+
+
+def test_negative_scalar_substitution_keeps_parentheses():
+    spec = scalar("x - p")
+    spec["parameters"] = [{"name": "p", "value": -2}]
+    built = build_problem(spec)
+    assert r"\left(-2\right)" in built.preview()["objective"]["latex"]
+
+
+def test_small_scalar_values_render_as_scientific_math_at_full_precision():
+    spec = scalar("p * square(x)")
+    spec["parameters"] = [{"name": "p", "value": 1.234567890123456e-8, "domain": "nonneg"}]
+    latex = build_problem(spec).preview()["objective"]["latex"]
+    assert r"1.234567890123456\times 10^{-8}" in latex
+    assert "e-08" not in latex
