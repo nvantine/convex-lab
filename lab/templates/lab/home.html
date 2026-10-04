@@ -4,14 +4,15 @@
 <h1>Your optimization notebook</h1>
 <p>Define variables and constants, write an objective and constraints, then inspect and solve the problem.</p>
 <p><a class="button" href="{% url 'new' %}">Create a problem</a></p>
-{% if is_guest %}<p class="notice">This guest workspace belongs to this browser session. Other guests have separate drafts and results. Save anything you need before logging out.</p>{% endif %}
+{% if is_guest %}<p class="notice">This guest workspace belongs to this browser session. Other guests have separate drafts and results. Copy any results you want to keep before logging out. Guest workspaces are not restored after logout.</p>{% endif %}
 <section>
   <h2>Editable drafts</h2>
   <ul>{% for problem in problems %}<li><a href="{% url 'edit' problem.pk %}">{{ problem.name }}</a> <small>{{ problem.updated_at|date:'Y-m-d H:i' }} UTC</small></li>{% empty %}<li>No drafts yet. Start with an example or write your own.</li>{% endfor %}</ul>
 </section>
 <section>
   <h2>Saved experiments</h2>
-  <div class="table-scroll"><table>
+  <p class="table-hint"><small>Scroll the table horizontally to see every column.</small></p>
+  <div class="table-scroll"><table class="experiment-table">
     <thead><tr><th>Problem</th><th>Solver status</th><th>Objective value</th><th>Saved</th></tr></thead>
     <tbody>{% for experiment in experiments %}<tr>
       <td><a href="{% url 'result' experiment.pk %}">{{ experiment.name }}</a></td>

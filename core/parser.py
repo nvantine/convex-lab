@@ -58,7 +58,13 @@ def symbol(name):
 
 
 def number(value):
-    return format(float(value), ".12g")
+    """Round-trip scalar values; scientific notation needs a real LaTeX exponent."""
+    value = float(value)
+    rendered = repr(value)
+    if "e" in rendered:
+        mantissa, exponent = rendered.split("e")
+        return mantissa + r"\times 10^{" + str(int(exponent)) + "}"
+    return str(int(value)) if value.is_integer() else rendered
 
 
 def numeric(value):

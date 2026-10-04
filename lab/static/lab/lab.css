@@ -63,3 +63,5 @@ dialog::backdrop { background: #172338aa; }
 .declarations-table { min-width: 490px; }
 .table-hint { display: none; }
 @media (max-width: 650px) { .table-hint { display: block; } }
+
+.experiment-table { min-width: 650px; }

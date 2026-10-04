@@ -46,9 +46,9 @@ def solve(built, solver="CLARABEL", seconds=2):
     max_violation = max((float(np.max(v)) for v in violations if v is not None), default=0.0) if has_solution else None
     return {
         "status": status, "optimal_value": plain(built.problem.value),
-        "variables": {name: plain(var.value) for name, var in built.variables.items()},
+        "variables": {name: plain(var.value) if has_solution else None for name, var in built.variables.items()},
         "constraints": [{"number": i + 1, "source": c["source"], "latex": c["latex"],
-                         "dual": plain(c["value"].dual_value),
+                         "dual": plain(c["value"].dual_value) if has_solution else None,
                          "violation": violations[i] if has_solution else None} for i, c in enumerate(built.constraints)],
         "max_violation": max_violation,
         "verified_optimal": status == cp.OPTIMAL and max_violation is not None and max_violation <= 1e-5,
