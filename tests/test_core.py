@@ -145,7 +145,7 @@ def test_math_substitution_constraint_count_and_matrix_values():
     preview = built.preview()
     assert "10" in preview["objective"]["latex"]
     assert "risk_aversion" not in preview["objective"]["latex"]
-    assert r"\mathrm{Sigma}" in preview["objective"]["latex"]
+    assert r"\Sigma" in preview["objective"]["latex"]
     assert len(preview["constraints"]) == 2
     assert preview["declarations"][1]["value"] == [[.01, 0], [0, .04]]
 

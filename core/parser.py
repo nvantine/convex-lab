@@ -5,11 +5,13 @@ DCP composition rules: Boyd & Vandenberghe §§3.2, 4.2; CVXPY DCP tutorial.
 """
 import ast
 import math
+import keyword
 import re
 from dataclasses import dataclass
 
 import cvxpy as cp
 import numpy as np
+from core.notation import atom_math, symbol
 
 
 class ProblemError(ValueError):
@@ -23,6 +25,7 @@ class Limits:
     ast_nodes: int = 500
     ast_depth: int = 50
     constraints: int = 100
+    criteria: int = 8
 
 
 @dataclass
@@ -39,9 +42,12 @@ class BuiltProblem:
     objective: dict
     constraints: list
     diagnostics: list
+    criteria: list
+    names: dict
 
     def preview(self):
-        return {"is_dcp": self.problem.is_dcp(), "objective": self.objective,
+        return {"is_dcp": self.problem.is_dcp() and all(c["is_dcp"] for c in self.criteria), "objective": self.objective,
+                "criteria": [{k: v for k, v in c.items() if k != "value"} for c in self.criteria],
                 "constraints": [{k: v for k, v in c.items() if k != "value"} for c in self.constraints],
                 "declarations": self.declarations, "diagnostics": self.diagnostics}
 
@@ -49,12 +55,8 @@ class BuiltProblem:
 ATOMS = {"sum": cp.sum, "sum_squares": cp.sum_squares, "square": cp.square,
          "quad_form": cp.quad_form, "norm": cp.norm, "abs": cp.abs,
          "pos": cp.pos, "max": cp.max, "maximum": cp.maximum,
-         "hstack": cp.hstack, "vstack": cp.vstack}
+         "hstack": cp.hstack, "vstack": cp.vstack, "transpose": cp.transpose}
 DOMAINS = {"free", "nonneg", "nonpos", "symmetric", "PSD"}
-
-
-def symbol(name):
-    return r"\mathrm{" + name.replace("_", r"\_") + "}"
 
 
 def number(value):
@@ -102,6 +104,11 @@ class Parser:
             node = ast.parse(source, mode="eval").body
         except (SyntaxError, RecursionError, MemoryError):
             raise ProblemError("Bad syntax. Use expressions such as quad_form(w, Sigma).") from None
+        from core.latex_input import LatexError, expand_latex_calls
+        try:
+            node = expand_latex_calls(node, {name: value.shape for name, value in self.names.items()})
+        except (LatexError, RecursionError) as error:
+            raise ProblemError(str(error)) from None
         self.nodes_used += sum(1 for _ in ast.walk(node))
         if self.nodes_used > self.limits.ast_nodes:
             raise ProblemError("Expression workload exceeds LAB_MAX_AST_NODES; simplify or ask the owner to raise it.")
@@ -116,7 +123,7 @@ class Parser:
                 raise ProblemError("An intermediate expression exceeds the configured size limit.")
             if not result.value.is_dcp():
                 self.diagnostics.append({"expression": ast.unparse(node), "curvature": result.value.curvature,
-                                         "sign": result.value.sign,
+                                         "sign": result.value.sign, "latex": result.latex,
                                          "rule": "DCP composition failed: check curvature and argument signs. Products of decision variables are not DCP; use square(x) for x squared."})
             return result
         except ProblemError:
@@ -153,9 +160,15 @@ class Parser:
             elif isinstance(node.op, ast.Sub):
                 value, latex = a.value - b.value, f"{a.latex} - \\left({b.latex}\\right)"
             elif isinstance(node.op, ast.Mult):
-                value, latex = cp.multiply(a.value, b.value), f"\\left({a.latex}\\right) \\cdot \\left({b.latex}\\right)"
+                value = cp.multiply(a.value, b.value)
+                operator = r"\odot" if a.value.shape and b.value.shape else r"\cdot"
+                latex = rf"\left({a.latex}\right) {operator} \left({b.latex}\right)"
             elif isinstance(node.op, ast.MatMult):
-                value, latex = a.value @ b.value, f"\\left({a.latex}\\right) \\mathbin{{@}} \\left({b.latex}\\right)"
+                value = a.value @ b.value
+                left = a.latex
+                if a.value.ndim == 1 and b.value.ndim >= 1 and not left.endswith(r"^{\top}"):
+                    left = rf"\left({left}\right)^{{\top}}"
+                latex = rf"\left({left}\right) \left({b.latex}\right)"
             elif isinstance(node.op, ast.Div):
                 if b.value.is_constant() and b.value.value is not None and np.any(b.value.value == 0):
                     raise ProblemError("Division by zero is undefined.")
@@ -216,10 +229,10 @@ class Parser:
                         p = ast.literal_eval(node.args[1])
                     except (ValueError, SyntaxError):
                         raise ProblemError("Norm order must be literal 1, 2, or 'inf'.") from None
-                    if p not in (1, 2, "inf") or isinstance(p, bool):
+                    if p not in (1, 2, "inf", "fro") or isinstance(p, bool):
                         raise ProblemError("Norm order must be 1, 2, or 'inf'.")
                 value = cp.norm(parts[0].value, p=p)
-                return Expression(value, r"\left\|" + parts[0].latex + r"\right\|_{" + str(p).replace("inf", r"\infty") + "}")
+                return Expression(value, r"\left\|" + parts[0].latex + r"\right\|_{" + str(p).replace("inf", r"\infty").replace("fro", "F") + "}")
             if len(node.args) != expected:
                 raise ProblemError(f"{name} needs {expected} argument(s).")
             parts = [self.expression(n, depth + 1) for n in node.args]
@@ -230,17 +243,7 @@ class Parser:
                 if not x.is_constant() and not matrix.is_constant():
                     raise ProblemError("quad_form cannot optimize its vector and matrix together: the joint expression is not DCP. Fix one as a parameter.")
             value = ATOMS[name](*(p.value for p in parts), **keywords)
-        args = ", ".join(p.latex for p in parts)
-        if name == "quad_form":
-            latex = f"\\left({parts[0].latex}\\right)^{{\\mathsf T}} {parts[1].latex} \\left({parts[0].latex}\\right)"
-        elif name == "square":
-            latex = f"\\left({args}\\right)^2"
-        elif name == "abs":
-            latex = r"\left|" + args + r"\right|"
-        else:
-            suffix = f"_{{\\mathrm{{axis}}={keywords['axis']}}}" if keywords else ""
-            latex = r"\operatorname{" + name.replace("_", r"\_") + "}" + suffix + r"\left(" + args + r"\right)"
-        return Expression(value, latex)
+        return Expression(value, atom_math(name, parts, keywords))
 
 
 def build_problem(spec, limits=None):
@@ -258,7 +261,7 @@ def build_problem(spec, limits=None):
             if not isinstance(row, dict):
                 raise ProblemError("Each declaration must be an object with a name and shape/value.")
             name, domain = row.get("name"), row.get("domain", "free")
-            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", name) or name in ATOMS or name in names:
+            if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", name) or name in ATOMS or name == "latex" or keyword.iskeyword(name) or name in names:
                 raise ProblemError("Names must be unique identifiers, start with a letter, and differ from atom names.")
             if not isinstance(domain, str) or domain not in DOMAINS:
                 raise ProblemError(f"{name}: choose free, nonneg, nonpos, symmetric, or PSD.")
@@ -299,24 +302,52 @@ def build_problem(spec, limits=None):
             except ValueError as error:
                 raise ProblemError(f"{name}: value/domain mismatch: {error}") from None
             names[name] = obj
-            declarations.append({"name": name, "kind": kind[:-1], "shape": list(shape), "domain": domain,
+            declarations.append({"name": name, "kind": kind[:-1], "shape": list(shape), "domain": domain, "latex_name": symbol(name),
                                  "meaning": row.get("meaning", ""), "units": row.get("units", ""),
                                  "value": array.tolist() if array is not None else None})
     parser = Parser(names, substitutions, limits)
-    objective = spec.get("objective", {})
-    if not isinstance(objective, dict) or objective.get("sense") not in ("minimize", "maximize"):
+    criteria = []
+    rows = spec.get("criteria")
+    if rows is not None:
+        if not isinstance(rows, list) or not 2 <= len(rows) <= limits.criteria:
+            raise ProblemError(f"Declare between 2 and {limits.criteria} criteria (owner-configurable workload limit).")
+        names_seen = set()
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict) or row.get("sense") not in ("minimize", "maximize"):
+                raise ProblemError("Each criterion needs a name, minimize/maximize direction, and expression.")
+            label = row.get("name")
+            if not isinstance(label, str) or not label.strip() or len(label) > 80 or label in names_seen:
+                raise ProblemError("Criterion names must be nonempty, unique, and at most 80 characters.")
+            names_seen.add(label)
+            for field in ("meaning", "units"):
+                if not isinstance(row.get(field, ""), str) or len(row.get(field, "")) > 500:
+                    raise ProblemError("Criterion meaning and units must be short text.")
+            expression = parser.expression(parser.tree(row.get("expression")))
+            if expression.value.shape != ():
+                raise ProblemError(f"Criterion {index+1} must be scalar.")
+            objective = cp.Minimize(expression.value) if row["sense"] == "minimize" else cp.Maximize(expression.value)
+            criteria.append({**row, "value": expression.value, "latex": expression.latex,
+                             "is_dcp": objective.is_dcp(), "curvature": expression.value.curvature})
+            if not objective.is_dcp():
+                parser.diagnostics.append({"expression": row["expression"], "latex": expression.latex,
+                    "curvature": expression.value.curvature, "sign": expression.value.sign,
+                    "rule": f"Criterion {index+1} failed: minimize convex or maximize concave."})
+        objective_spec = rows[0]
+    else:
+        objective_spec = spec.get("objective", {})
+    if not isinstance(objective_spec, dict) or objective_spec.get("sense") not in ("minimize", "maximize"):
         raise ProblemError("Choose minimize or maximize for the objective.")
-    expression = parser.expression(parser.tree(objective.get("expression")))
+    expression = parser.expression(parser.tree(objective_spec.get("expression")))
     if expression.value.shape != ():
         raise ProblemError("The objective must be scalar. Reduce vectors with sum, sum_squares, or norm.")
-    sense = objective["sense"]
+    sense = objective_spec["sense"]
     cp_objective = cp.Minimize(expression.value) if sense == "minimize" else cp.Maximize(expression.value)
-    objective_display = {"source": objective["expression"], "latex": r"\operatorname{" + sense + r"}\quad " + expression.latex,
+    objective_display = {"source": objective_spec["expression"], "latex": r"\operatorname{" + sense + r"}\quad " + expression.latex,
                          "curvature": expression.value.curvature, "sign": expression.value.sign, "sense": sense}
-    if not cp_objective.is_dcp():
-        parser.diagnostics.append({"expression": objective["expression"], "curvature": expression.value.curvature,
-                                   "sign": expression.value.sign,
-                                   "rule": "Objective rule failed: minimize a convex expression or maximize a concave expression."})
+    if not criteria and not cp_objective.is_dcp():
+        parser.diagnostics.append({"expression": objective_spec["expression"], "latex": expression.latex,
+            "curvature": expression.value.curvature, "sign": expression.value.sign,
+            "rule": "Objective rule failed: minimize a convex expression or maximize a concave expression."})
     sources = spec.get("constraints")
     if not isinstance(sources, list) or len(sources) > limits.constraints:
         raise ProblemError("Constraints must be a list of at most 100 comparison expressions.")
@@ -340,7 +371,7 @@ def build_problem(spec, limits=None):
                             "value": value, "is_dcp": value.is_dcp()})
         if not value.is_dcp():
             parser.diagnostics.append({"expression": source, "curvature": f"left {a.value.curvature}; right {b.value.curvature}",
-                                       "sign": f"left {a.value.sign}; right {b.value.sign}",
+                                       "sign": f"left {a.value.sign}; right {b.value.sign}", "latex": f"{a.latex} {relation} {b.latex}",
                                        "rule": f"Constraint {len(constraints)} failed: equality needs affine sides; <= needs convex left and concave right (reverse for >=)."})
     problem = cp.Problem(cp_objective, [c["value"] for c in constraints])
-    return BuiltProblem(problem, variables, declarations, objective_display, constraints, parser.diagnostics)
+    return BuiltProblem(problem, variables, declarations, objective_display, constraints, parser.diagnostics, criteria, names)
