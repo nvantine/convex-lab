@@ -1,0 +1,19 @@
+[project]
+name = "convex-lab"
+version = "0.1.0"
+description = "An editable convex optimization notebook with visible mathematics"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "django==6.1.1", "cvxpy==1.9.3", "numpy==2.5.3",
+  "plotly==7.1.0", "python-dotenv==1.2.4",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "pytest-django==4.14.0", "playwright==1.63.0"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["browser: real Chromium tests (run separately)"]
+addopts = "-m 'not browser'"

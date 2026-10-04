@@ -1,0 +1,10 @@
+.venv/
+.env
+.env.*
+!.env.example
+*.sqlite3*
+__pycache__/
+.pytest_cache/
+staticfiles/
+.local/
+playwright-report/
