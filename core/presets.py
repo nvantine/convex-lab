@@ -69,3 +69,28 @@ PRESETS["cvar"] = ("Scenario CVaR", {
 
 def get_preset(name):
     return deepcopy(PRESETS[name][1])
+
+
+# Multicriterion presets use the same editable expressions (Boyd §4.7, §6.3).
+def criterion(name, expression, sense="minimize", units="", meaning=""):
+    return {"name": name, "expression": expression, "sense": sense, "units": units, "meaning": meaning}
+
+s = portfolio()
+s.pop("objective")
+s["criteria"] = [criterion("Variance", "quad_form(w, Sigma)", units="daily return squared"),
+                 criterion("Return", "mu @ w", "maximize", "daily return")]
+PRESETS["return-risk"] = ("Return and risk frontier", s)
+s = deepcopy(s)
+s["variables"][0]["shape"] = [3]
+s["parameters"][0]["value"] = [[.01, 0, 0], [0, .025, 0], [0, 0, .04]]
+s["parameters"][1]["value"] = [.001, .0017, .002]
+s["parameters"].append(parameter("w_prev", [.5, .3, .2], "Previous allocation; editable reference"))
+s["criteria"].append(criterion("Turnover", "norm(w - w_prev, 1)", units="allocation fraction"))
+PRESETS["return-risk-turnover"] = ("Return, risk and turnover", deepcopy(s))
+s["criteria"].append(criterion("Concentration", "sum_squares(w)", units="fraction squared"))
+PRESETS["four-criteria"] = ("Return, risk, turnover and concentration", s)
+s = get_preset("least-squares")
+s.pop("objective")
+s["criteria"] = [criterion("Residual", "sum_squares(A @ x - b)", units="response squared"),
+                 criterion("Coefficient size", "sum_squares(x)", units="coefficient squared")]
+PRESETS["least-squares-tradeoff"] = ("Residual and coefficient size", s)

@@ -169,7 +169,14 @@ class LatexParser:
                     raise LatexError('Use a transpose or a literal square. General powers are not supported.')
                 power = int(exponent) * sign
                 if power == 2:
-                    value = Term(call('square', value.node), value.shape, value.row, value.indexed)
+                    # Squared Euclidean/Frobenius norms share the direct QP atom.
+                    node = value.node
+                    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'norm'
+                            and len(node.args) == 2 and isinstance(node.args[1], ast.Constant)
+                            and (node.args[1].value == 'fro' or (node.args[1].value == 2 and len(getattr(node.args[0], 'latex_shape', ())) <= 1))):
+                        value = Term(call('sum_squares', node.args[0]))
+                    else:
+                        value = Term(call('square', node), value.shape, value.row, value.indexed)
                 elif isinstance(value.node, ast.Constant) and abs(power) <= 100:
                     try:
                         value = Term(ast.Constant(value.node.value ** power))
@@ -178,17 +185,42 @@ class LatexParser:
                 else:
                     raise LatexError('Decision expressions support squares; other powers are limited to numeric constants.')
             else:
-                indices = [self.take()]
-                while self.peek() == ',':
-                    self.take(','); indices.append(self.take())
+                tokens = []
+                while self.peek() and self.peek() not in ('}', ')', '+', '*', '/', '=', r'\le', r'\ge'):
+                    if self.peek() not in (':', ',', '-') and not self.peek().isdigit() and self.peek() not in self.indices:
+                        break
+                    tokens.append(self.take())
+                    if not braced:
+                        break
+                indices = ''.join(tokens).split(',')
                 if all(index in self.indices for index in indices):
                     value.indexed = True
-                elif all(index.isdigit() for index in indices):
-                    index_nodes = [ast.Constant(int(index)) for index in indices]
+                elif indices and all(re.fullmatch(r'-?\d+|(?:-?\d*)?:(?:-?\d*)?(?::(?:-?\d*)?)?', index) for index in indices):
+                    if len(indices) > len(value.shape):
+                        raise LatexError('Too many indices for the declared shape.')
+                    index_nodes, shape = [], []
+                    for dimension, text in zip(value.shape, indices):
+                        def integer(text):
+                            number = int(text)
+                            return ast.Constant(number) if number >= 0 else ast.UnaryOp(ast.USub(), ast.Constant(-number))
+                        if ':' in text:
+                            bounds = text.split(':')
+                            if len(bounds) > 3:
+                                raise LatexError('A slice uses start:stop:step.')
+                            bounds += [''] * (3-len(bounds))
+                            numbers = [int(b) if b else None for b in bounds]
+                            try:
+                                shape.append(len(range(*slice(*numbers).indices(dimension))))
+                            except ValueError as error:
+                                raise LatexError(str(error)) from error
+                            index_nodes.append(ast.Slice(*[integer(b) if b else None for b in bounds]))
+                        else:
+                            index_nodes.append(integer(text))
+                    shape += list(value.shape[len(indices):])
                     index = index_nodes[0] if len(indices) == 1 else ast.Tuple(elts=index_nodes, ctx=ast.Load())
-                    value = Term(ast.Subscript(value.node, index, ctx=ast.Load()), value.shape[len(indices):])
+                    value = Term(ast.Subscript(value.node, index, ctx=ast.Load()), tuple(shape))
                 else:
-                    raise LatexError('Indices are zero-based literal integers, or dummy indices within a sum/max.')
+                    raise LatexError('Use zero-based integer indices, literal slices, or dummy indices within a sum/max.')
             if braced:
                 self.take('}')
         return value

@@ -26,10 +26,12 @@ def solve(built, solver="CLARABEL", seconds=2):
     """Use native solver budgets; canonicalization is not a hard time limit."""
     if solver not in SOLVERS or solver not in cp.installed_solvers():
         raise ProblemError("Choose an installed solver: CLARABEL, OSQP, or SCS.")
+    if built.criteria:
+        raise ProblemError('Use Pareto sampling for a multicriterion problem.')
     if not built.problem.is_dcp():
         raise ProblemError("DCP rules failed. Inspect the explanation and reformulate before solving.")
     options = {
-        "CLARABEL": {"time_limit": seconds, "max_threads": 1},
+        "CLARABEL": {"time_limit": seconds, "max_threads": 1, "tol_gap_abs": 1e-8, "tol_gap_rel": 1e-8, "tol_feas": 1e-9},
         "OSQP": {"time_limit": seconds, "eps_abs": 1e-7, "eps_rel": 1e-7},
         "SCS": {"time_limit_secs": seconds, "eps_abs": 1e-6, "eps_rel": 1e-6},
     }[solver]

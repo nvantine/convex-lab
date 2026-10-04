@@ -181,8 +181,8 @@ class Parser:
         if isinstance(node, ast.Subscript):
             a = child(node.value)
             index = self.index(node.slice)
-            label = ast.unparse(node.slice).replace("_", r"\_")
-            return Expression(a.value[index], f"{a.latex}_{{\\text{{{label}}}}}")
+            label = (", ".join(ast.unparse(x) for x in node.slice.elts) if isinstance(node.slice, ast.Tuple) else ast.unparse(node.slice)).replace("_", r"\_")
+            return Expression(a.value[index], f"{a.latex}_{{{label}}}")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ATOMS:
             return self.call(node, depth)
         raise ProblemError("Only declared names, numeric literals, indexing, arithmetic, and listed atoms are allowed. Python attributes and code are not expressions.")

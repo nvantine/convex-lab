@@ -16,7 +16,7 @@ def scalar(expression="square(x)", constraints=None, sense="minimize"):
             "objective": {"sense": sense, "expression": expression}, "constraints": constraints or []}
 
 
-@pytest.mark.parametrize("key", PRESETS)
+@pytest.mark.parametrize("key", [key for key in PRESETS if "objective" in get_preset(key)])
 def test_every_preset_is_dcp_and_solves(key):
     result = solve(build_problem(get_preset(key)))
     assert result["status"] == "optimal"

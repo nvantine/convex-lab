@@ -13,7 +13,7 @@ def shapes(spec):
     return {d['name']:tuple(d['shape']) for d in build_problem(spec).declarations}
 
 
-@pytest.mark.parametrize('key', list(PRESETS))
+@pytest.mark.parametrize('key', [key for key in PRESETS if 'objective' in get_preset(key)])
 def test_every_initial_preset_roundtrips_and_has_same_optimum(key):
     spec = get_preset(key)
     names = shapes(spec)
@@ -52,7 +52,7 @@ def test_common_notation(tex, expected):
 def test_indices_stacking_and_frobenius_norm():
     names = {'x': (2,), 'X': (2,2)}
     assert to_expression(r'X_{0,1}', names) == 'X[0, 1]'
-    assert to_expression(r'\|X\|_F^2', names) == "square(norm(X, 'fro'))"
+    assert to_expression(r'\|X\|_F^2', names) == 'sum_squares(X)'
     assert 'hstack' in to_expression(r'\begin{bmatrix}x & x\end{bmatrix}', names)
     assert to_expression(r'10^{-3} x', names) == '0.001 * x'
 
@@ -92,3 +92,14 @@ def test_large_latex_and_bad_symbols_have_friendly_errors():
         to_expression('x+'*2000+'x', {'x': ()})
     with pytest.raises(LatexError, match='Unknown symbol'):
         to_expression(r'\theta x', {'x': ()})
+
+
+def test_slices_roundtrip_without_python_looking_text():
+    spec = get_preset('min-variance')
+    for source in ('sum(w[0:2])', 'sum(w[::-1])', 'w[-1]', 'sum(Sigma[:, 0])'):
+        rendered = expression_source(source, spec)
+        assert r'\text' not in rendered
+        converted = to_expression(rendered, shapes(spec))
+        # Build/solve to validate index shapes through the actual whitelist.
+        changed = {**spec, 'objective': {'sense': 'minimize', 'expression': converted}}
+        assert build_problem(changed).problem.is_dcp()
