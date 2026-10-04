@@ -1,0 +1,36 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Convex Lab{% endblock %}</title>
+  <link rel="icon" href="{% static 'lab/favicon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'vendor/katex/katex.min.css' %}">
+  <link rel="stylesheet" href="{% static 'lab/lab.css' %}">
+  <script defer src="{% static 'vendor/katex/katex.min.js' %}"></script>
+  {% block scripts %}{% endblock %}
+  <script defer src="{% static 'lab/lab.js' %}"></script>
+</head>
+<body>
+  <header>
+    <a class="brand" href="{% url 'home' %}">Convex Lab</a>
+    {% if user.is_authenticated %}
+      <nav aria-label="Main navigation">
+        <a href="{% url 'home' %}">Home</a>
+        <a href="{% url 'new' %}">New problem</a>
+      </nav>
+      <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button>Log out {{ user.username }}</button></form>
+    {% endif %}
+  </header>
+  <main>
+    {% for message in messages %}<p class="notice" role="status">{{ message }}</p>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Editable mathematics · synchronous solves · local assets</footer>
+  <dialog id="chart-dialog" aria-label="Expanded chart">
+    <button type="button" id="close-chart">Close chart</button>
+    <div id="expanded-chart"></div>
+  </dialog>
+</body>
+</html>

@@ -61,8 +61,9 @@ PRESETS["cvar"] = ("Scenario CVaR", {
     "version": 1, "variables": [variable("w", [2], "Allocation fractions"),
                                 variable("t", [], "Loss threshold"), variable("u", [4], "Excess losses")],
     "parameters": [parameter("R", [[0.02, -0.01], [-0.03, 0.01], [0.01, 0.005], [-0.01, -0.02]], "Scenario returns"),
-                   parameter("tail_multiplier", 5, "1 / (scenario count * (1 - alpha)); here alpha = 0.95", "nonneg")],
-    "objective": {"sense": "minimize", "expression": "t + tail_multiplier * sum(u)"},
+                   parameter("alpha", 0.95, "CVaR confidence level (choose 0 < alpha < 1)", "nonneg"),
+                   parameter("scenario_count", 4, "Number of rows in R; update if you edit scenarios", "nonneg")],
+    "objective": {"sense": "minimize", "expression": "t + sum(u) / (scenario_count * (1 - alpha))"},
     "constraints": ["sum(w) == 1", "w >= 0", "u >= 0", "u >= -R @ w - t"]})
 
 

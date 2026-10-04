@@ -1,0 +1,66 @@
+{% extends 'lab/base.html' %}
+{% load static lab_tags %}
+{% block title %}{{ experiment.name }} · Convex Lab{% endblock %}
+{% block scripts %}<script defer src="{% static 'vendor/plotly.min.js' %}"></script>{% endblock %}
+{% block content %}
+<h1>{{ experiment.name }}</h1>
+<p>This experiment is a frozen snapshot. Editing the draft will not change it.</p>
+<form method="post" action="{% url 'clone' experiment.pk %}">{% csrf_token %}<button>Clone into an editable problem</button></form>
+<div class="result-grid">
+<div>
+<section>
+  <h2>Solver result</h2>
+  <dl class="metrics">
+    <dt>Status</dt><dd id="solver-status">{{ experiment.result.status }}</dd>
+    <dt>Objective value</dt><dd>{{ experiment.result.optimal_value|number_display }}</dd>
+    <dt>Solver</dt><dd>{{ experiment.result.solver }}</dd>
+    <dt>Elapsed seconds</dt><dd>{{ experiment.result.elapsed_seconds|floatformat:3 }}</dd>
+    <dt>Largest constraint violation</dt><dd>{{ experiment.result.max_violation|number_display }}</dd>
+  </dl>
+  {% if experiment.result.verified_optimal %}<p class="success">Optimal status with checked constraint residuals (tolerance 0.00001).</p>
+  {% else %}<p class="notice">This result is not a verified optimum. An infeasible problem has no feasible solution; an unbounded objective has no finite optimum. Inaccurate or time-limited results need review.</p>{% endif %}
+  {% for warning in experiment.result.warnings %}<p class="notice">{{ warning }}</p>{% endfor %}
+</section>
+<section>
+  <h2>Decision variables</h2>
+  <p><small>Values use eight significant digits here. Full precision is saved in reproducibility details.</small></p>
+  {% for variable in variables %}
+  <article>
+    <h3>{{ variable.name }} — {{ variable.meaning }}</h3>
+    {% if variable.entries %}
+    <div class="table-scroll"><table><thead><tr><th>Index</th><th>Value</th></tr></thead>
+      <tbody>{% for entry in variable.entries %}<tr><td>{{ entry.index }}</td><td>{{ entry.value|number_display }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if variable.chart %}
+      <button type="button" class="expand-chart" data-target="chart-{{ forloop.counter }}">Expand chart</button>
+      <div id="chart-{{ forloop.counter }}" class="chart" data-chart="figure-{{ forloop.counter }}"></div>
+      {% with number=forloop.counter|stringformat:'s' %}{% with script_id='figure-'|add:number %}{{ variable.chart|json_script:script_id }}{% endwith %}{% endwith %}
+    {% endif %}
+    {% else %}<p>No decision values are available for this solver status.</p>{% endif %}
+  </article>
+  {% endfor %}
+</section>
+</div>
+<aside>{% include 'lab/_math.html' %}</aside>
+</div>
+<section>
+  <h2>Dual variables / shadow prices</h2>
+  <p>These values describe local sensitivity of this solved objective to its constraints. Units depend on the objective and constraint. Equality duals can have either sign; nonnegative inequality multipliers refer to the canonical ≤ form. For maximization, interpret sensitivities using the negated minimization objective.</p>
+  <p class="table-hint"><small>Scroll the table horizontally to see every column.</small></p>
+  <div class="table-scroll"><table class="duals-table">
+    <thead><tr><th>Constraint</th><th>Expression</th><th>Dual value</th><th>Violation</th></tr></thead>
+    <tbody>{% for constraint in experiment.result.constraints %}<tr>
+      <td>{{ constraint.number }}</td><td><code>{{ constraint.source }}</code></td>
+      <td><pre>{{ constraint.dual|numeric_display }}</pre></td><td><pre>{{ constraint.violation|numeric_display }}</pre></td>
+    </tr>{% empty %}<tr><td colspan="4">This problem has no explicit constraints.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<details><summary>Reproducibility details</summary>
+  <p>Saved {{ experiment.created_at|date:'Y-m-d H:i:s' }} UTC · Specification and solver digest:</p><code class="digest">{{ experiment.digest }}</code>
+  <h3>Solver options</h3><pre>{{ experiment.result.solver_options|json_display }}</pre>
+  <h3>Constraint evidence at full precision</h3><pre>{{ experiment.result.constraints|json_display }}</pre>
+  <h3>Decision values at full precision</h3><pre>{{ experiment.result.variables|json_display }}</pre>
+  <h3>Runtime versions</h3><pre>{{ experiment.result.runtime|json_display }}</pre>
+  <h3>Frozen problem specification</h3><pre>{{ experiment.spec|json_display }}</pre>
+</details>
+{% endblock %}

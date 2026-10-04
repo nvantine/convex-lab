@@ -1,0 +1,14 @@
+{% extends 'lab/base.html' %}
+{% block title %}Log in · Convex Lab{% endblock %}
+{% block content %}
+<h1>Log in</h1>
+<p>Define an optimization problem and see its mathematics next to the solution.</p>
+<form method="post" class="login-form">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  {% for field in form %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}</p>{% endfor %}
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <button>Log in</button>
+</form>
+<p>Guest browsers have separate workspaces. Logging out ends access to that guest workspace.</p>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends 'lab/base.html' %}
+{% block title %}Problem editor · Convex Lab{% endblock %}
+{% block content %}
+<h1>{% if draft %}Edit problem{% else %}Define a problem{% endif %}</h1>
+<p>Everything below is editable. Changing a preset changes an ordinary symbolic problem.</p>
+{% if not draft %}
+<form method="get" class="preset-picker">
+  <label for="preset">Start from an example</label>
+  <select id="preset" name="preset">{% for key, title in presets %}<option value="{{ key }}" {% if request.GET.preset == key %}selected{% endif %}>{{ title }}</option>{% endfor %}</select>
+  <button>Load example</button>
+</form>
+{% endif %}
+<form method="post" id="problem-form">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  <p>{{ form.name.label_tag }} {{ form.name }} {{ form.name.errors }}</p>
+  <fieldset><legend>Decision variables</legend>
+    <p>{{ form.variables.help_text }}</p>
+    <div id="variables-editor" class="declarations"></div>
+    <button type="button" class="add-declaration" data-kind="variables" hidden>Add variable</button>
+    <details class="declaration-json" open><summary>Edit variable declaration JSON</summary>{{ form.variables }}</details>
+    {{ form.variables.errors }}
+  </fieldset>
+  <fieldset><legend>Parameters: named constants</legend>
+    <p>{{ form.parameters.help_text }}</p>
+    <div id="parameters-editor" class="declarations"></div>
+    <button type="button" class="add-declaration" data-kind="parameters" hidden>Add parameter</button>
+    <details class="declaration-json" open><summary>Edit parameter declaration JSON</summary>{{ form.parameters }}</details>
+    {{ form.parameters.errors }}
+  </fieldset>
+  <fieldset><legend>Objective</legend>
+    <p>{{ form.sense.label_tag }} {{ form.sense }} {{ form.sense.errors }}</p>
+    <p>{{ form.expression.label_tag }} {{ form.expression }} {{ form.expression.errors }}</p>
+  </fieldset>
+  <fieldset><legend>Feasible set</legend>
+    {{ form.constraints.label_tag }} {{ form.constraints }}
+    <p><small>{{ form.constraints.help_text }}</small></p>{{ form.constraints.errors }}
+  </fieldset>
+  <p>{{ form.solver.label_tag }} {{ form.solver }} {{ form.solver.errors }}</p>
+  <p><small>CLARABEL is the default. OSQP handles quadratic programs; use CLARABEL or SCS for cone constraints. Solver execution has a time budget; problem compilation adds time.</small></p>
+  <div class="actions">
+    <button name="action" value="preview">Check math &amp; DCP</button>
+    <button name="action" value="save">Save draft</button>
+    <button name="action" value="solve">Solve &amp; save experiment</button>
+  </div>
+</form>
+{% if preview %}{% include 'lab/_math.html' %}{% endif %}
+<section>
+  <h2>Expression reference</h2>
+  <p><code>+</code>, <code>-</code>, <code>*</code> (elementwise), <code>/</code>, <code>@</code> (matrix product), <code>**2</code>, and literal indexing such as <code>w[0]</code> or <code>w[0:2]</code>.</p>
+  <p><code>sum(x)</code>, <code>sum_squares(x)</code>, <code>square(x)</code>, <code>quad_form(w, Sigma)</code>, <code>norm(x, 1)</code>, <code>norm(x, 2)</code>, <code>norm(x, 'inf')</code>, <code>abs(x)</code>, <code>pos(x)</code>, <code>max(x)</code>, <code>maximum(x, y)</code>, <code>hstack([x, y])</code>, <code>vstack([x, y])</code>. <code>sum</code> and <code>max</code> accept <code>axis=0</code> or <code>axis=1</code>.</p>
+  <p>A parameter is fixed for one solve. A variable is optimized. Promoting a parameter can introduce products of variables; the DCP check explains whether the new expression is supported.</p>
+  <p>Shape <code>[]</code> means scalar. Indices start at zero. A covariance parameter used in <code>quad_form</code> should have domain <code>PSD</code>; its supplied matrix is validated.</p>
+</section>
+{% endblock %}
