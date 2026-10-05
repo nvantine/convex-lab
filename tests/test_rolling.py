@@ -160,3 +160,11 @@ def test_failed_late_rebalance_rolls_back_unrecorded_carry(prices,monkeypatch):
     assert failed['status']=='trading_cost_failure'
     for key in ('wealth','borrow_cost','financing_cost','ending_cash'):
         np.testing.assert_allclose(failed[key],prefix[key])
+
+
+def test_gross_fee_equation_selects_largest_feasible_root():
+    # Existing signed notionals can create two roots when c*sum(abs(w))>1.
+    # f(0)>0, f(.45)<0, f(1)>0: the positive larger root is intended.
+    after,deltas=rolling.trade_to_weights(1,np.array([10,-9]),[20,-19],.1)
+    assert after==pytest.approx(2.9/4.9)
+    assert after+.1*np.abs(deltas).sum()==pytest.approx(1)

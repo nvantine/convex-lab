@@ -120,3 +120,26 @@ def test_daily_command_is_bounded_and_retries_previous_errors(client,owner,fetch
     call_command('refresh_datasets',owner=owner.username,max_batches=1,stdout=output)
     assert fetcher.call_count==1
     assert 'historical batches' in output.getvalue()
+
+
+def test_partial_asset_exclusion_is_explicit_and_recorded(client,owner,fetcher):
+    client.force_login(owner);record=start(client)
+    original=fetcher.side_effect
+    fetcher.side_effect=lambda *a:(original(*a)[0].drop(columns='AGG'),original(*a)[1])
+    batch(client,record)
+    response=client.post(reverse('fetch_action',args=[record.pk]),{'action':'available','confirm':'on'})
+    assert response.status_code==302
+    record.refresh_from_db()
+    assert record.dataset.prices['symbols']==['SPY']
+    assert record.dataset.provenance['excluded_symbols']==['AGG']
+
+
+def test_busy_slots_cache_failure_and_guest_scope(client,guest,fetcher,monkeypatch):
+    client.force_login(guest);record=start(client);batch(client,record)
+    two=Client();two.force_login(guest)
+    other=start(two,prefer_cache='on');batch(two,other)
+    assert fetcher.call_count==2
+    capacity=Mock();capacity.acquire.return_value=False
+    monkeypatch.setattr(data_views,'SOLVE_SLOTS',capacity)
+    assert batch(client,record).status_code==503
+    capacity.release.assert_not_called()
