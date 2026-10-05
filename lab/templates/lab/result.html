@@ -24,6 +24,8 @@
 <p>Status: {{ experiment.result.selection.primary_result.status }} · Value: {{ experiment.result.selection.primary_result.optimal_value|number_display }}</p>
 <pre>{{ experiment.result.selection.tie_attempts|json_display }}</pre></details>{% endif %}
 </section>{% endif %}
+{% if not point and experiment.result.verified_optimal %}<p><a class="button" href="{% url 'evaluate' experiment.pk %}">Evaluate fixed holdings</a></p>{% endif %}
+{% if experiment.spec.data %}<p>Training dataset asset order: {{ experiment.spec.data.symbols|join:', ' }}. {% if estimates_edited %}Imported training parameters were edited.{% endif %}</p>{% endif %}
 <div class="result-grid">
 <div>
 <section>

@@ -1,0 +1,26 @@
+{% extends 'lab/base.html' %}
+{% load static lab_tags %}
+{% block title %}{{ dataset.name }} · Dataset{% endblock %}
+{% block scripts %}<script defer src="{% static 'vendor/plotly.min.js' %}"></script>{% endblock %}
+{% block content %}
+<h1>{{ dataset.name }}</h1>
+<p>{{ dataset.source }} · {{ dataset.prices.symbols|join:', ' }} · {{ dataset.prices.dates|length }} shared price dates. The asset order shown here determines vector entries.</p>
+{% if dataset.provenance.trimmed_dates %}<p class="notice">Trimmed {{ dataset.provenance.trimmed_dates }} boundary dates to align different asset histories. Review the actual windows below. No prices were filled.</p>{% endif %}
+<section><h2>Chronological windows</h2>
+<p>The first 60% of return observations train the estimates. The next 20% is reusable validation. The final 20% remains hidden until you confirm a final evaluation.</p>
+<div class="table-scroll"><table><thead><tr><th>Window</th><th>First return</th><th>Last return</th><th>Observations</th></tr></thead><tbody>
+<tr><th>Training</th><td>{{ windows.train.first }}</td><td>{{ windows.train.last }}</td><td>{{ windows.train.count }}</td></tr>
+<tr><th>Validation</th><td>{{ windows.validation.first }}</td><td>{{ windows.validation.last }}</td><td>{{ windows.validation.count }}</td></tr>
+<tr><th>Final holdout</th><td>{{ windows.holdout.first }}</td><td>{{ windows.holdout.last }}</td><td>{{ windows.holdout.count }}</td></tr>
+</tbody></table></div>
+{% if holdout %}<p class="notice">The final holdout has been opened for this snapshot. <a href="{% url 'evaluation' holdout.pk %}">View its frozen evaluation</a>. Further validation is exploratory.</p>{% else %}<p class="success">Final holdout locked. Its prices and returns are not included in this page.</p>{% endif %}
+<button type="button" class="expand-chart" data-target="dataset-chart">Expand chart</button>
+<div id="dataset-chart" class="chart" data-chart="dataset-figure"></div>{{ chart|json_script:'dataset-figure' }}
+<p><small>The dashed line ends training; the chart ends at validation. Prices normalized to 1 show price ratios, not an executed portfolio.</small></p>
+</section>
+<section><h2>Create an editable problem from training</h2>
+<p>Use arithmetic mean daily returns, your selected covariance estimator, and training-only scenarios. Every imported parameter, variable, objective, and constraint remains editable in the problem editor.</p>
+<form method="post">{% csrf_token %}{{ form.non_field_errors }}{% for field in form %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}<small>{{ field.help_text }}</small></p>{% endfor %}<button>Create editable problem</button></form>
+</section>
+<details><summary>Data provenance and coverage</summary><pre>{{ dataset.provenance|json_display }}</pre><p class="digest">Data fingerprint: {{ dataset.digest }}</p></details>
+{% endblock %}

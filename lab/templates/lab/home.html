@@ -21,4 +21,5 @@
     </tr>{% empty %}<tr><td colspan="4">No saved solves yet.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
+<section><h2>Saved evaluations</h2><ul>{% for evaluation in evaluations %}<li><a href="{% url 'evaluation' evaluation.pk %}">{{ evaluation.experiment.name }} · {{ evaluation.get_window_display }}</a> · {{ evaluation.dataset.name }}</li>{% empty %}<li>No historical evaluations yet. <a href="{% url 'datasets' %}">Start with a dataset</a>.</li>{% endfor %}</ul></section>
 {% endblock %}

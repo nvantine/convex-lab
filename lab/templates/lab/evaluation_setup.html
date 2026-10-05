@@ -1,0 +1,16 @@
+{% extends 'lab/base.html' %}
+{% block title %}Evaluate {{ experiment.name }}{% endblock %}
+{% block content %}
+<h1>Evaluate fixed holdings</h1>
+<p><a href="{% url 'result' experiment.pk %}">{{ experiment.name }}</a></p>
+<p>{{ notice }}</p>
+<p>Choose a decision vector to interpret as weights in the dataset's displayed asset order. Negative entries are short exposures. There is one entry trade at the first evaluation close, then holdings drift without rebalancing or refitting.</p>
+<p>Costs apply to buys and sells at entry. Short borrowing and negative-cash financing accrue using calendar days / 365. Positive cash earns zero. Ending holdings are marked to market with no exit trade or exit fee.</p>
+{% if has_datasets %}
+<form method="post">{% csrf_token %}{{ form.non_field_errors }}
+{% for field in form %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}<small>{{ field.help_text }}</small></p>{% endfor %}
+<div class="actions"><button name="action" value="validation">Evaluate validation &amp; save</button>
+<button name="action" value="review_holdout">Review final holdout…</button></div>
+</form>
+{% else %}<p class="notice">No dataset exists in this workspace. <a href="{% url 'datasets' %}">Fetch a dataset first</a>, then create and solve an editable problem.</p>{% endif %}
+{% endblock %}

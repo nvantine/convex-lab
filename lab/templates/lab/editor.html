@@ -10,6 +10,12 @@
   <button>Load example</button>
 </form>
 {% endif %}
+{% if data_binding %}
+<section><h2>Training data binding</h2>
+<p><a href="{% url 'dataset' data_binding.dataset_id %}">View the frozen dataset</a> · Asset order: {{ data_binding.symbols|join:', ' }}</p>
+<p>Estimates: {{ data_binding.estimation.estimator }} · {{ data_binding.estimation.observations }} training returns through {{ data_binding.estimation.last_return }}.</p>
+{% if estimates_edited %}<p class="notice">The imported training parameters have been edited. Current constants remain editable; original estimation provenance no longer certifies their values.</p>{% endif %}
+</section>{% endif %}
 <form method="post" id="problem-form">
   {% csrf_token %}
   {{ form.non_field_errors }}

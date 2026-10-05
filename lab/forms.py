@@ -1,6 +1,8 @@
 from django import forms
 from core.input import convert_spec, editable_spec
 from core.solve import SOLVERS
+from core.data import PORTFOLIO_PRESETS
+from core.presets import PRESETS
 
 
 class ProblemForm(forms.Form):
@@ -53,3 +55,52 @@ def initial_from_spec(name, spec, language='latex', limits=None):
             'sense': objective['sense'], 'expression': objective['expression'],
             'criteria': source.get('criteria', []), 'constraints': '\n'.join(source['constraints']),
             'solver': 'CLARABEL', 'method': 'weighted', 'samples': 20, 'normalize': True, 'primary': 0, 'seed': 42}
+
+
+class DatasetForm(forms.Form):
+    name = forms.CharField(max_length=120, initial='Market history')
+    source = forms.ChoiceField(choices=[('alpaca','Alpaca · adjusted IEX daily bars'), ('yfinance','yfinance · adjusted Yahoo daily prices')], label='Data provider')
+    symbols = forms.CharField(label='Ticker symbols', help_text='Stocks or ETFs, separated by commas or spaces. Use actual ticker symbols, not a description.')
+    start = forms.DateField(widget=forms.DateInput(attrs={'type':'date'}), label='Start date (inclusive)')
+    end = forms.DateField(widget=forms.DateInput(attrs={'type':'date'}), label='End date (inclusive, completed days)')
+
+    def clean_symbols(self):
+        import re
+        from django.conf import settings
+        values = list(dict.fromkeys(re.split(r'[\s,]+', self.cleaned_data['symbols'].strip().upper())))
+        if not values or len(values)>settings.LAB_MAX_ASSETS or any(not re.fullmatch(r'[A-Z^][A-Z0-9.\^=\-]{0,19}', v) for v in values):
+            raise forms.ValidationError(f'Enter 1–{settings.LAB_MAX_ASSETS} actual ticker symbols (for example SPY, AAPL, AGG).')
+        return values
+
+    def clean(self):
+        from datetime import date
+        data = super().clean()
+        if data.get('start') and data.get('end'):
+            if data['start'] >= data['end']:
+                self.add_error('end','End must be after start.')
+            if data['end'] >= date.today():
+                self.add_error('end','Choose a date before today so incomplete daily bars are excluded.')
+        return data
+
+
+class TrainingForm(forms.Form):
+    preset = forms.ChoiceField(choices=[(k, PRESETS[k][0]) for k in PORTFOLIO_PRESETS], label='Starting example')
+    estimator = forms.ChoiceField(choices=[('ledoit-wolf','Ledoit–Wolf shrinkage'), ('sample','Sample covariance')], label='Covariance estimator')
+    lookback = forms.IntegerField(required=False, min_value=2, label='Training return observations (optional)', help_text='Blank uses all training observations. Estimates and CVaR scenarios use training only.')
+
+
+class EvaluationForm(forms.Form):
+    dataset = forms.ModelChoiceField(queryset=None, label='Frozen dataset')
+    variable = forms.ChoiceField(label='Decision vector to treat as asset weights')
+    cost_bps = forms.FloatField(min_value=0,max_value=1000,initial=10,label='Entry trading cost (bps per buy or sell)')
+    borrow_rate = forms.FloatField(min_value=0,max_value=1,initial=.03,label='Annual short borrow rate (fraction)',help_text='0.03 means 3%; charged on prior-close short notional, calendar days / 365.')
+    financing_rate = forms.FloatField(min_value=0,max_value=1,initial=0,label='Annual negative-cash financing rate (fraction)')
+    risk_free_rate = forms.FloatField(min_value=0,max_value=1,initial=0,label='Annual risk-free rate for Sharpe (fraction)',help_text='Used in the statistic only. Positive cash earns zero in this model.')
+
+    def __init__(self, *args, datasets, variables, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['dataset'].queryset = datasets
+        self.fields['variable'].choices = [(v,v) for v in variables]
+
+    def options(self):
+        return {key:self.cleaned_data[key] for key in ('cost_bps','borrow_rate','financing_rate','risk_free_rate')}

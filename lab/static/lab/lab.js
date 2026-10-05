@@ -263,3 +263,10 @@ document.querySelector("#close-chart")?.addEventListener("click", () => {
   dialog.close();
   if (window.Plotly) Plotly.purge("expanded-chart");
 });
+
+const datasetForm = document.querySelector('#dataset-form');
+if (datasetForm) datasetForm.addEventListener('submit', () => {
+  const button = datasetForm.querySelector('button');
+  button.disabled = true;
+  button.textContent = 'Fetching daily prices…';
+});

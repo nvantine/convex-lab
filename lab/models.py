@@ -1,4 +1,4 @@
-"""Two small storage models: mutable drafts and frozen solver evidence."""
+"""Editable drafts, frozen solver evidence, price snapshots, and evaluations."""
 import uuid
 
 from django.conf import settings
@@ -47,3 +47,52 @@ class Experiment(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Dataset(models.Model):
+    """An immutable adjusted-price snapshot. The full payload stays on the server."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    workspace = models.UUIDField(db_index=True)
+    name = models.CharField(max_length=120)
+    source = models.CharField(max_length=12)
+    prices = models.JSONField()
+    provenance = models.JSONField()
+    digest = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError('Datasets are immutable. Fetch a new snapshot to change data.')
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class Evaluation(models.Model):
+    """A frozen fixed-holdings evaluation; one final opening per data fingerprint."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    workspace = models.UUIDField(db_index=True)
+    experiment = models.ForeignKey(Experiment, on_delete=models.PROTECT)
+    dataset = models.ForeignKey(Dataset, on_delete=models.PROTECT)
+    dataset_digest = models.CharField(max_length=64)
+    window = models.CharField(max_length=12, choices=[('validation','Validation'),('holdout','Final holdout')])
+    variable = models.CharField(max_length=40)
+    result = models.JSONField()
+    digest = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [models.UniqueConstraint(fields=['owner','workspace','dataset_digest'],
+            condition=models.Q(window='holdout'), name='one_final_holdout_per_snapshot')]
+
+    def save(self, *args, **kwargs):
+        if type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError('Evaluations are immutable. Run a new validation evaluation to change assumptions.')
+        return super().save(*args, **kwargs)

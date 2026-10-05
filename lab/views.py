@@ -1,7 +1,6 @@
 """Request coordination only; the math lives in core/."""
 import hashlib
 import json
-from threading import BoundedSemaphore
 from types import SimpleNamespace
 
 import numpy as np
@@ -19,11 +18,11 @@ from core.solve import solve
 from core.pareto import run_frontier
 from core.charts import frontier_charts
 from lab.forms import ProblemForm, initial_from_spec
-from lab.models import Experiment, Problem
+from lab.models import Experiment, Problem, Evaluation, Dataset
+from core.data import estimates_edited
+from lab.request_limits import SOLVE_SLOTS
 from lab.workspaces import scoped, workspace_for
 
-# One process, five active numerical requests. No queued/background work.
-SOLVE_SLOTS = BoundedSemaphore(5)
 
 
 def limits():
@@ -34,7 +33,7 @@ def limits():
 @login_required
 def home(request):
     return render(request, "lab/home.html", {"problems": scoped(Problem, request),
-                  "experiments": scoped(Experiment, request), "is_guest": not request.user.is_staff})
+                  "experiments": scoped(Experiment, request), "evaluations": scoped(Evaluation, request), "is_guest": not request.user.is_staff})
 
 
 @login_required
@@ -54,6 +53,8 @@ def editor(request, pk=None):
         else:
             try:
                 spec = form.specification(limits())
+                if draft and draft.spec.get('data'):
+                    spec['data'] = draft.spec['data']
                 built = build_problem(spec, limits())
                 preview = built.preview()
                 if action in {'to_latex', 'to_expression'}:
@@ -105,7 +106,7 @@ def editor(request, pk=None):
             form.add_error(None, str(error))
     return render(request, "lab/editor.html", {"form": form, "preview": preview, "draft": draft,
                   "presets": [(key, value[0]) for key, value in PRESETS.items()],
-                  "max_samples": settings.LAB_MAX_FRONTIER_SAMPLES})
+                  "max_samples": settings.LAB_MAX_FRONTIER_SAMPLES, "data_binding": spec.get("data"), "estimates_edited": estimates_edited(spec)})
 
 
 @login_required
@@ -165,7 +166,7 @@ def render_solution(request, experiment, point=None):
         {**evidence, 'latex': constraint['latex']}
         for evidence, constraint in zip(experiment.result['constraints'], preview['constraints'])]}
     return render(request, "lab/result.html", {"experiment": experiment, "preview": preview, "point": point,
-                                               "variables": variables, "criterion_rows": criterion_rows})
+                                               "variables": variables, "criterion_rows": criterion_rows, "estimates_edited": estimates_edited(experiment.spec)})
 
 
 @login_required

@@ -1,0 +1,2 @@
+{% extends 'lab/base.html' %}
+{% block content %}<h1>Evaluation could not run</h1><p class="notice">{{ error }}</p><p><a href="{% url 'evaluate' experiment.pk %}">Return to evaluation settings</a></p>{% endblock %}
