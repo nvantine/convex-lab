@@ -26,14 +26,14 @@ def atom_math(name, parts, keywords):
     a = parts[0].latex
     shape = parts[0].value.shape
     if name == 'quad_form':
-        return rf'{grouped(parts[0], 40)}^{{\top}} {grouped(parts[1], 20)} {grouped(parts[0], 20)}'
+        return rf'{grouped(parts[0], 41)}^{{\top}} {grouped(parts[1], 20)} {grouped(parts[0], 20)}'
     if name == 'transpose':
-        return rf'{grouped(parts[0], 40)}^{{\top}}'
+        return rf'{grouped(parts[0], 41)}^{{\top}}'
     if name == 'square':
-        return grouped(parts[0], 40) + '^{' + ('2' if not shape else r'\circ 2') + '}'
+        return grouped(parts[0], 41) + '^{' + ('2' if not shape else r'\circ 2') + '}'
     if name == 'sum_squares':
         p = 'F' if len(shape) == 2 else '2'
-        return rf'\left\|{a}\right\|_{{{p}}}^2' if shape else grouped(parts[0], 40) + '^2'
+        return rf'\left\|{a}\right\|_{{{p}}}^2' if shape else grouped(parts[0], 41) + '^2'
     if name in ('sum', 'max'):
         if not shape:
             return a

@@ -85,6 +85,25 @@ def test_boundary_alignment_without_inventing_prices():
         aligned_prices(frame,['SPY','AGG'])
 
 
+def test_provenance_ignores_equivalent_number_formatting_order_and_labels(prices):
+    spec,_,digest=problem_from_training(prices,'cvar')
+    spec['data']={'estimates_digest':digest}
+    spec['parameters'].reverse()
+    for p in spec['parameters']:
+        p['meaning']='An edited description'
+        if p['name']=='scenario_count': p['value']=float(p['value'])
+    assert estimates_edited(spec) is False
+    spec['parameters'].append({'name':'extra','value':1})
+    assert estimates_edited(spec) is False
+    spec['parameters']=[p for p in spec['parameters'] if p['name']!='R']
+    assert estimates_edited(spec) is True
+
+
+def test_negative_zero_is_equivalent_to_javascript_zero():
+    from core.data import estimates_fingerprint
+    assert estimates_fingerprint([{'name':'Sigma','value':[[.01,-0.],[0.,.02]]}])==estimates_fingerprint([{'name':'Sigma','value':[[.01,0],[0,.02]]}])
+
+
 @pytest.mark.parametrize('bad',['missing','zero','infinite','duplicate','short','strings','dates'])
 def test_bad_history_is_a_friendly_error(bad):
     frame=synthetic_frame()

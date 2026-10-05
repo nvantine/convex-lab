@@ -2,6 +2,7 @@
 from copy import deepcopy
 import hashlib
 import json
+from importlib.metadata import version
 import numpy as np
 import pandas as pd
 from sklearn.covariance import LedoitWolf
@@ -84,10 +85,24 @@ def estimate_training(payload, estimator='ledoit-wolf', lookback=None):
     covariance = (covariance+covariance.T)/2
     return {'mu': values.mean(axis=0).tolist(), 'Sigma': covariance.tolist(), 'R': values.tolist(),
             'estimator': estimator, 'shrinkage': shrinkage, 'observations': len(returns),
+            'versions':{name:version(name) for name in ('numpy','pandas','scikit-learn')},
             'first_return': str(returns.index[0].date()), 'last_return': str(returns.index[-1].date())}
 
 
 PORTFOLIO_PRESETS = ['min-variance','mean-variance','risk-cap','signed','cvar', 'return-risk','return-risk-turnover','four-criteria']
+
+
+def estimates_fingerprint(parameters):
+    """Compare numerical estimates, ignoring row order, labels, and 0 versus 0.0."""
+    values = []
+    for p in parameters:
+        if p['name'] not in ('mu','Sigma','R','scenario_count'):
+            continue
+        array = np.asarray(p['value'],dtype=float)
+        # JSON/JavaScript loses the sign of -0.0, which carries no information.
+        array = np.where(array==0,0.,array)
+        values.append({'name':p['name'],'value':array.tolist()})
+    return content_digest(sorted(values,key=lambda p:p['name']))
 
 
 def problem_from_training(payload, preset='min-variance', estimator='ledoit-wolf', lookback=None):
@@ -110,8 +125,7 @@ def problem_from_training(payload, preset='min-variance', estimator='ledoit-wolf
             parameter['value'] = scenarios
         elif name == 'w_prev':
             parameter['value'] = [1/n]*n
-    estimates = [p for p in spec['parameters'] if p['name'] in ('mu','Sigma','R','scenario_count')]
-    return spec, {key:value for key,value in estimate.items() if key not in ('mu','Sigma','R')}, content_digest(estimates)
+    return spec, {key:value for key,value in estimate.items() if key not in ('mu','Sigma','R')}, estimates_fingerprint(spec['parameters'])
 
 
 def estimates_edited(spec):
@@ -119,7 +133,6 @@ def estimates_edited(spec):
     if not binding:
         return None
     try:
-        estimates = [p for p in spec['parameters'] if p['name'] in ('mu','Sigma','R','scenario_count')]
-        return content_digest(estimates) != binding['estimates_digest']
+        return estimates_fingerprint(spec['parameters']) != binding['estimates_digest']
     except (KeyError,TypeError,ValueError):
         return True

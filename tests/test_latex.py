@@ -153,6 +153,11 @@ def test_standard_portfolio_math_has_no_unnecessary_parentheses():
     ('w[0] * 3', False),
     ('sum(w)', False),
     ('quad_form(w, Sigma)', False),
+    ('square(square(w[0]))', True),
+    ('square(sum_squares(w))', True),
+    ('square(sum(w))', True),
+    ('2 * sum(w[0] + w[1])', True),
+    ('w[0:2][0]', True),
 ])
 def test_minimal_grouping_roundtrips_without_changing_values(source, grouping):
     spec = get_preset('min-variance')

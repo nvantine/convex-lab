@@ -176,7 +176,7 @@ class Parser:
                 value = a.value @ b.value
                 left = a.latex
                 if a.value.ndim == 1 and b.value.ndim >= 1 and not a.row:
-                    left = grouped(a, 40) + r"^{\top}"
+                    left = grouped(a, 41) + r"^{\top}"
                 latex = f"{grouped(a, 20) if a.value.ndim != 1 or a.row else left} {grouped(b, 21 if isinstance(node.right, ast.BinOp) and isinstance(node.right.op, ast.Mult) and b.value.shape else 20)}"
             elif isinstance(node.op, ast.Div):
                 if b.value.is_constant() and b.value.value is not None and np.any(b.value.value == 0):
@@ -195,7 +195,8 @@ class Parser:
             a = child(node.value)
             index = self.index(node.slice)
             label = (", ".join(ast.unparse(x) for x in node.slice.elts) if isinstance(node.slice, ast.Tuple) else ast.unparse(node.slice)).replace("_", r"\_")
-            return Expression(a.value[index], f"{grouped(a, 40)}_{{{label}}}")
+            base = rf'\left({a.latex}\right)' if isinstance(node.value, ast.Subscript) else grouped(a)
+            return Expression(a.value[index], f"{base}_{{{label}}}")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ATOMS:
             return self.call(node, depth)
         raise ProblemError("Only declared names, numeric literals, indexing, arithmetic, and listed atoms are allowed. Python attributes and code are not expressions.")
@@ -256,8 +257,10 @@ class Parser:
                 if not x.is_constant() and not matrix.is_constant():
                     raise ProblemError("quad_form cannot optimize its vector and matrix together: the joint expression is not DCP. Fix one as a parameter.")
             value = ATOMS[name](*(p.value for p in parts), **keywords)
-        return Expression(value, atom_math(name, parts, keywords), not parts[0].row if name == 'transpose' and value.ndim == 1 else False,
-                          20 if name == 'quad_form' else 40 if name in ('square', 'transpose') else 100)
+        precedence = 20 if name in ('quad_form','sum','max') else 40 if name in ('square','transpose','sum_squares') else 100
+        if name in ('sum','max') and not parts[0].value.shape:
+            precedence = parts[0].precedence  # Reduction of a scalar is identity.
+        return Expression(value, atom_math(name, parts, keywords), not parts[0].row if name == 'transpose' and value.ndim == 1 else False, precedence)
 
 
 def build_problem(spec, limits=None):
