@@ -86,6 +86,29 @@ def parser():
     cmd.add_argument("--confirm-holdout", action="store_true")
     cmd.add_argument("--options", type=object_json, default={})
     cmd.add_argument("--seed", type=int, default=42); cmd.add_argument("--timeout", type=float, default=600)
+    cmd.add_argument("--params", type=object_json, default={})
+    strategies = sub.add_parser("strategies").add_subparsers(dest="action", required=True)
+    strategies.add_parser("list")
+    cmd = strategies.add_parser("show"); cmd.add_argument("id")
+    cmd = strategies.add_parser("register"); cmd.add_argument("path"); cmd.add_argument("--entry-point")
+    cmd.add_argument("--interface", choices=("portfolio", "research"), required=True)
+    cmd.add_argument("--name", required=True); cmd.add_argument("--description", default="")
+    cmd = sub.add_parser("research").add_subparsers(dest="action", required=True).add_parser("run")
+    cmd.add_argument("id"); cmd.add_argument("--dataset")
+    cmd.add_argument("--params", type=object_json, default={}); cmd.add_argument("--seed", type=int, default=42)
+    cmd.add_argument("--window", choices=("train", "validation", "holdout"), default="validation")
+    cmd.add_argument("--confirm-holdout", action="store_true"); cmd.add_argument("--timeout", type=float, default=600)
+    cmd = sub.add_parser("tests").add_subparsers(dest="action", required=True).add_parser("run")
+    cmd.add_argument("id"); cmd.add_argument("--timeout", type=float, default=600)
+    cmd.add_argument("--pytest-args", type=json.loads, default=[])
+    runs = sub.add_parser("runs").add_subparsers(dest="action", required=True)
+    runs.add_parser("list")
+    for name in ("show", "export", "recover", "replay"):
+        cmd = runs.add_parser(name); cmd.add_argument("id")
+        if name == "replay": cmd.add_argument("--allow-version-mismatch", action="store_true")
+    cmd = sub.add_parser("notes").add_subparsers(dest="action", required=True).add_parser("add")
+    cmd.add_argument("id"); cmd.add_argument("--kind", choices=("finding", "bug", "idea"), default="finding")
+    cmd.add_argument("--text", required=True)
     return p
 
 
@@ -153,7 +176,7 @@ def fetch_until_done(record):
     return data
 
 
-def execute(args):
+def execute_base(args, run=None):
     from django.conf import settings
     from core.parser import ATOMS, build_problem
     from core.presets import PRESETS, get_preset
@@ -215,8 +238,6 @@ def execute(args):
         if args.action == "show":
             return {**snapshot(dataset), "symbols": dataset.prices["symbols"], "windows": windows,
                     "provenance": dataset.provenance}
-        if args.window == "holdout":
-            raise CLIError("Holdout export is added with the shared one-time research ledger.")
         end = windows[args.window]["end"] + 1
         return {"dataset_id": str(dataset.pk), "digest": dataset.digest, "window": args.window,
                 "prices": {**dataset.prices, "dates": dataset.prices["dates"][:end], "values": dataset.prices["values"][:end]}}
@@ -257,8 +278,128 @@ def execute(args):
                    "scenario_count_parameter": "scenario_count", "previous_weights_parameter": "w_prev",
                    "scenario_variable": "u"}.items() if v in
                    [d["name"] for d in experiment.spec["parameters"] + experiment.spec["variables"]]}, **args.options}
-        return snapshot(services.save_evaluation(scope, experiment, dataset, args.variable, args.window, options))
+        return snapshot(services.save_evaluation(scope, experiment, dataset, args.variable, args.window, options, run=run))
     raise CLIError("Unknown command.")
+
+
+def execute(args):
+    from core.parser import ProblemError
+    from core.research import portfolio_report
+    from lab import research, services
+    from lab.models import ResearchRun, StrategyRevision, Dataset, Problem, Experiment, Evaluation
+    if args.command in ("config", "doctor", "capabilities", "presets", "whoami"):
+        return execute_base(args)
+    scope = scope_for(args)
+    if args.command == "strategies":
+        if args.action == "list":
+            return [{**snapshot(r), "interface":r.interface, "entry_point":r.entry_point} for r in scope.query(StrategyRevision)]
+        if args.action == "show":
+            r = get_record(scope, StrategyRevision, args.id)
+            return {**snapshot(r), "interface":r.interface, "entry_point":r.entry_point, "sources":r.sources}
+        return snapshot(research.register(scope, args.path, args.entry_point, args.interface, args.name, args.description))
+    if args.command == "runs":
+        if args.action == "list":
+            return [{"id":str(r.pk), "name":r.name, "kind":r.kind, "status":r.status, "url":url("research_run", r.pk)}
+                    for r in scope.query(ResearchRun)]
+        run = get_record(scope, ResearchRun, args.id)
+        if args.action == "recover": return snapshot(research.recover(run))
+        if args.action == "replay": return replay(scope, run, args)
+        return {**snapshot(run), "config":run.config, "runtime":run.runtime, "artifacts":run.artifacts,
+                "notes":run.notes, "error":run.error, "revision_id":str(run.revision_id) if run.revision_id else None}
+    if args.command == "notes":
+        from django.db import transaction
+        from django.utils import timezone
+        # Short immediate SQLite transaction serializes concurrent annotations.
+        with transaction.atomic():
+            run = get_record(scope, ResearchRun, args.id)
+            run.notes = [*run.notes, {"kind":args.kind, "text":args.text, "at":timezone.now().isoformat()}]
+            run.save(update_fields=["notes"])
+        return snapshot(run)
+    is_custom = args.command in ("research", "tests")
+    if args.command == "backtest":
+        is_custom = scope.query(StrategyRevision).filter(pk=args.id).exists()
+    should_save = is_custom or args.command in ("solve", "frontier", "backtest", "choose") or (
+        args.command == "datasets" and args.action in ("fetch", "resume", "refresh", "export"))
+    if not should_save: return execute_base(args)
+    config = {k:v for k,v in vars(args).items() if k not in ("owner", "human", "idempotency_key")}
+    dataset = get_record(scope, Dataset, args.dataset) if getattr(args, "dataset", None) else None
+    if args.command == "datasets" and args.action == "export": dataset = get_record(scope, Dataset, args.id)
+    revision = get_record(scope, StrategyRevision, args.id) if is_custom else None
+    if revision and args.command == "backtest" and revision.interface != "portfolio":
+        raise CLIError("Use research run for a standalone research script.")
+    if revision and args.command == "research" and revision.interface != "research":
+        raise CLIError("Use backtest for a portfolio callback.")
+    if revision and revision.interface == "portfolio" and not dataset:
+        raise CLIError("Portfolio strategies require --dataset.")
+    window = getattr(args, "window", "")
+    if window == "holdout" and not args.confirm_holdout:
+        raise CLIError("Opening the final holdout requires --window holdout --confirm-holdout.")
+    if window == "holdout" and dataset is None: raise CLIError("Holdout research requires --dataset.")
+    if hasattr(args, "seed") and not 0 <= args.seed < 2**32: raise CLIError("Seed must be between 0 and 2^32-1.")
+    if hasattr(args, "timeout") and not 0 < args.timeout <= 86400: raise CLIError("Timeout must be positive and at most 86400 seconds.")
+    if args.command in ("solve", "frontier"):
+        draft = get_record(scope, Problem, args.id); config["spec"] = draft.spec
+    if args.command == "tests" and (not isinstance(args.pytest_args, list) or any(not isinstance(x,str) for x in args.pytest_args)):
+        raise CLIError("--pytest-args must be a JSON list of argument strings.")
+    name = revision.name if revision else args.command + " · " + getattr(args, "action", getattr(args, "id", ""))[:80]
+    run, created = research.begin(scope, name, "tests" if args.command == "tests" else "backtest" if args.command == "backtest"
+        else "research" if is_custom else args.command, config, dataset, window, revision,
+        idempotency_key=args.idempotency_key, claim_holdout=window == "holdout")
+    if not created: return snapshot(run)
+    try:
+        with research.evidence(run):
+            if is_custom:
+                if args.command == "tests":
+                    research.run_tests(run, args.timeout, args.pytest_args)
+                else:
+                    options = {"mode":"fixed", "frequency":"monthly", "lookback":126, **getattr(args, "options", {})}
+                    research.run_python(run, args.params, options, args.seed, args.timeout)
+                return snapshot(run)
+            output = execute_base(args, run=run)
+            links = {}
+            if args.command in ("solve", "frontier", "choose"):
+                saved = get_record(scope, Experiment, output["id"]); links["experiment"] = saved
+                report = {"schema_version":1, "provenance":"CVXPY", "metrics":{
+                    "objective_value":{"value":saved.result.get("optimal_value"), "unit":"objective", "direction":saved.spec.get("objective", {}).get("sense", "none")}},
+                    "text":"Saved symbolic solution; inspect its mathematics and solver evidence.", "charts":[], "tables":[], "equations":[]}
+                if saved.kind == "frontier":
+                    from core.charts import frontier_charts
+                    report["charts"] = [{"figure":c["figure"]} for c in frontier_charts(saved.result)]
+            elif args.command == "backtest":
+                saved = get_record(scope, Evaluation, output["id"]); links.update(evaluation=saved, experiment=saved.experiment)
+                report = portfolio_report(saved.result)
+            else:
+                report = {"schema_version":1, "provenance":"data operation", "metrics":{}, "operation":output}
+            if run.status == "running":
+                research.finish(run, report, **links)
+            return {**output, "run_id":str(run.pk), "run_url":url("research_run", run.pk)}
+    except Exception as error:
+        raise CLIError(f"{research.redact(str(error))} Saved run: {run.pk}; {url('research_run', run.pk)}") from error
+
+
+def replay(scope, original, args):
+    from lab import research
+    if original.holdout_claim:
+        raise CLIError("Final holdout runs cannot be replayed as another untouched test.")
+    if research.runtime_versions()["packages"] != original.runtime.get("packages") and not args.allow_version_mismatch:
+        raise CLIError("Dependency versions differ. Restore recorded versions or pass --allow-version-mismatch.")
+    config = {**original.config, "replay_of":str(original.pk)}
+    run, _ = research.begin(scope, original.name + " · replay", original.kind, config, original.dataset,
+                            original.window, original.revision, idempotency_key=args.idempotency_key)
+    with research.evidence(run):
+        if original.revision:
+            if original.kind == "tests":
+                research.run_tests(run, config.get("timeout",600), config.get("pytest_args",[]))
+            else:
+                options = {"mode":"fixed", "frequency":"monthly", "lookback":126, **config.get("options",{})}
+                research.run_python(run, config.get("params",{}), options, config.get("seed",42), config.get("timeout",600))
+        elif original.kind in ("solve", "frontier"):
+            from lab import services
+            saved = services.solve_problem(scope, original.name, config["spec"], config["solver"], config.get("options"))
+            research.finish(run, {"schema_version":1,"provenance":"CVXPY", "metrics":{}}, experiment=saved)
+        else:
+            raise CLIError("Replay is supported for Python runs, tests, and symbolic solves. Repeat other commands with their frozen configuration.")
+    return snapshot(run)
 
 
 def main(argv=None):
@@ -268,7 +409,7 @@ def main(argv=None):
         data = execute(args)
         print(json.dumps({"schema_version": 1, "ok": True, "data": data},
                          allow_nan=False, default=str, indent=2 if args.human else None))
-        return 0
+        return 1 if isinstance(data, dict) and data.get("status") in ("failed", "interrupted", "partial") else 0
     except KeyboardInterrupt:
         print(json.dumps({"schema_version": 1, "ok": False, "error": {"code": "interrupted", "message": "Interrupted."}}))
         return 130
@@ -276,9 +417,10 @@ def main(argv=None):
         from core.parser import ProblemError
         from django.db import OperationalError
         code = 2 if isinstance(error, (CLIError, ProblemError, ValueError, KeyError)) else 3 if isinstance(error, OperationalError) else 1
+        from lab.research import redact
         print(json.dumps({"schema_version": 1, "ok": False, "error":
               {"code": "invalid_input" if code == 2 else "retryable" if code == 3 else "execution_failed",
-               "message": str(error)}}))
+               "message": redact(str(error))}}))
         return code
 
 

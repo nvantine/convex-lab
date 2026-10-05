@@ -246,6 +246,14 @@ for (const chart of document.querySelectorAll("[data-chart]")) {
   const figure = JSON.parse(document.getElementById(chart.dataset.chart).textContent);
   Plotly.newPlot(chart, figure.data, figure.layout, {responsive: true, displaylogo: false}).then(() => {
     chart.on("plotly_click", event => inspectPoint(chart, event));
+    let previousWidth = chart.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (chart.clientWidth > 0 && chart.clientWidth !== previousWidth) {
+        previousWidth = chart.clientWidth;
+        Plotly.relayout(chart, {width: previousWidth});
+      }
+    });
+    observer.observe(chart);
   });
 }
 const dialog = document.querySelector("#chart-dialog");
@@ -257,7 +265,7 @@ for (const button of document.querySelectorAll(".expand-chart")) {
       ? JSON.parse(JSON.stringify({data: chart.data, layout: chart.layout}))
       : JSON.parse(document.getElementById(chart.dataset.chart).textContent);
     dialog.showModal();
-    Plotly.newPlot("expanded-chart", figure.data, {...figure.layout, height: undefined, autosize: true}, {responsive: true, displaylogo: false}).then(() => {
+    Plotly.newPlot("expanded-chart", figure.data, {...figure.layout, width: undefined, height: undefined, autosize: true}, {responsive: true, displaylogo: false}).then(() => {
       document.querySelector("#expanded-chart").on("plotly_click", event => inspectPoint(chart, event));
     });
   });
@@ -306,4 +314,18 @@ if (fetchControls) {
   resume.addEventListener('click', run);
   document.querySelector('#fetch-pause').addEventListener('click', () => { paused = true; status.textContent += ' Pausing after the current batch.'; });
   if (fetchControls.dataset.autoRun === 'true') run();
+}
+
+const runProgress = document.querySelector('[data-run-status]');
+if (runProgress) {
+  const poll = async () => {
+    try {
+      const response = await fetch(runProgress.dataset.runStatus, {credentials: 'same-origin'});
+      if (!response.ok) { runProgress.textContent = 'Status unavailable. Refresh to retry.'; return; }
+      const result = await response.json();
+      if (result.status !== 'running') { window.location.reload(); return; }
+      setTimeout(poll, 5000);
+    } catch (error) { runProgress.textContent = 'Connection interrupted. Refresh to retry.'; }
+  };
+  setTimeout(poll, 5000);
 }

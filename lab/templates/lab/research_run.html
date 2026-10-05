@@ -1,0 +1,40 @@
+{% extends 'lab/base.html' %}
+{% load static lab_tags %}
+{% block scripts %}<script defer src="{% static 'vendor/plotly.min.js' %}"></script>{% endblock %}
+{% block content %}
+<h1>{{ run.name }}</h1>
+<p>Status: <strong id="research-status">{{ run.status }}</strong> · {{ run.kind }} · {{ run.created_at|date:'Y-m-d H:i' }} UTC</p>
+{% if run.status == 'running' and not public %}<p class="notice" data-run-status="{% url 'run_status' run.pk %}">This foreground CLI process is running. This page updates automatically when it finishes.</p>{% endif %}
+{% if run.error and not public %}<p class="notice" role="alert">{{ run.error }}</p>{% endif %}
+<p>Evidence: {{ run.result.provenance|default:'Execution record' }}{% if run.window %} · {{ run.window }}{% endif %}</p>
+{% if run.holdout_claim %}<p class="notice">This run opened the final holdout. It remains recorded even if execution failed.</p>{% endif %}
+{% if not public %}
+<p><a href="{% url 'research_index' %}">Return to research ledger</a></p>
+{% if run.revision %}<p><a href="{% url 'strategy_revision' run.revision.pk %}">Source revision: {{ run.revision.name }}</a></p>{% endif %}
+{% if run.experiment %}<p><a href="{% url 'result' run.experiment.pk %}">Inspect saved problem, math, and solver evidence</a></p>{% endif %}
+{% if run.evaluation %}<p><a href="{% url 'evaluation' run.evaluation.pk %}">Inspect historical evaluation and trades</a></p>{% endif %}
+{% endif %}
+{% if run.result.text %}<section><h2>Findings</h2><p class="report-text">{{ run.result.text }}</p></section>{% endif %}
+{% if metrics %}<section><h2>Metrics</h2><div class="table-scroll"><table>
+<thead><tr><th>Metric</th><th>Value</th><th>Unit</th></tr></thead>
+<tbody>{% for name, metric in metrics.items %}<tr><td>{{ name }}</td><td>{{ metric.value|number_display }}</td><td>{{ metric.unit }}</td></tr>{% endfor %}</tbody>
+</table></div></section>{% endif %}
+{% if run.result.equations %}<section><h2>Author-supplied equations</h2>
+<p>These describe the Python model; they are not an automatic convexity certificate.</p>
+{% for equation in run.result.equations %}<div class="math" data-math>{{ equation }}</div>{% endfor %}</section>{% endif %}
+{% for chart in charts %}<section>{% include 'lab/_chart.html' with key=chart.key figure=chart.figure %}</section>{% endfor %}
+{% for table in tables %}<section><h2>{{ table.title|default:'Results table' }}</h2><div class="table-scroll"><table>
+<thead><tr>{% for column in table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+<tbody>{% for row in table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+</table></div></section>{% endfor %}
+{% if run.result.portfolio.trades %}<section><h2>Simulated trades</h2><div class="table-scroll"><table>
+<thead><tr><th>Signal</th><th>Trade close</th><th>Turnover</th><th>Cost</th><th>Target weights</th></tr></thead>
+<tbody>{% for trade in run.result.portfolio.trades %}<tr><td>{{ trade.signal_date }}</td><td>{{ trade.date }}</td><td>{{ trade.turnover|number_display }}</td><td>{{ trade.cost|number_display }}</td><td>{{ trade.weights|json_display }}</td></tr>{% endfor %}</tbody>
+</table></div></section>{% endif %}
+{% if not public %}
+{% if children %}<section><h2>Trials</h2><ul>{% for child in children %}<li><a href="{% url 'research_run' child.pk %}">{{ child.name }}</a> · {{ child.status }}</li>{% endfor %}</ul></section>{% endif %}
+<section><h2>Notes</h2>{% for note in run.notes %}<p><strong>{{ note.kind }}</strong>: {{ note.text }}</p>{% empty %}<p>No annotations yet.</p>{% endfor %}</section>
+<section><h2>Saved artifacts</h2><ul>{% for item in run.artifacts %}<li><a href="{% url 'artifact' run.pk forloop.counter0 %}">{{ item.path }}</a> · {{ item.size }} bytes</li>{% empty %}<li>No file artifacts.</li>{% endfor %}</ul></section>
+<details><summary>Reproducibility details</summary><h3>Configuration</h3><pre>{{ run.config|json_display }}</pre><h3>Runtime</h3><pre>{{ run.runtime|json_display }}</pre><h3>Dataset fingerprint</h3><code>{{ run.dataset_digest }}</code></details>
+{% endif %}
+{% endblock %}

@@ -101,15 +101,26 @@ def provenance_notice(experiment):
     return "Imported estimates and scenarios are unchanged and use training observations only."
 
 
-def save_evaluation(scope, experiment, dataset, variable, window, options, seconds=None, evaluator=None):
+def save_evaluation(scope, experiment, dataset, variable, window, options, seconds=None, evaluator=None, run=None):
     if window == "holdout":
         existing = scope.query(Evaluation).filter(dataset_digest=dataset.digest, window="holdout").first()
         if existing:
             return existing
     weights = evaluation_inputs(experiment, dataset, variable)
-    result = (evaluator or evaluate_portfolios)(dataset.prices, weights, window, options, experiment.spec,
-        variable, limits(), seconds=seconds or settings.LAB_EVALUATION_SECONDS,
-        maximum_refits=settings.LAB_MAX_REFITS)
+    if window == "holdout" and run is None:
+        from lab import research
+        run, _ = research.begin(scope, experiment.name + " · final holdout", "backtest",
+            {"experiment":str(experiment.pk), "options":options, "variable":variable}, dataset,
+            window, claim_holdout=True)
+    try:
+        result = (evaluator or evaluate_portfolios)(dataset.prices, weights, window, options, experiment.spec,
+            variable, limits(), seconds=seconds or settings.LAB_EVALUATION_SECONDS,
+            maximum_refits=settings.LAB_MAX_REFITS)
+    except BaseException as error:
+        if run:
+            from lab import research
+            research.finish(run, status="failed", error=str(error))
+        raise
     result["provenance_notice"] = provenance_notice(experiment)
     result["runtime"] = experiment.result.get("runtime", {})
     defaults = dict(owner=scope.owner, workspace=scope.workspace, experiment=experiment, dataset=dataset,
@@ -120,5 +131,9 @@ def save_evaluation(scope, experiment, dataset, variable, window, options, secon
         saved, _ = Evaluation.objects.get_or_create(owner=scope.owner, workspace=scope.workspace,
             dataset_digest=dataset.digest, window=window, defaults={k: v for k, v in defaults.items()
             if k not in ("owner", "workspace", "dataset_digest", "window")})
+        if run:
+            from lab import research
+            from core.research import portfolio_report
+            research.finish(run, portfolio_report(result), evaluation=saved, experiment=experiment)
         return saved
     return Evaluation.objects.create(**defaults)

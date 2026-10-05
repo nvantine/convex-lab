@@ -35,9 +35,9 @@ TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIR
               "OPTIONS": {"context_processors": ["django.template.context_processors.request",
                          "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
 WSGI_APPLICATION = "config.wsgi.application"
-DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3",
+DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": os.getenv("LAB_DATABASE_PATH", BASE_DIR / "db.sqlite3"),
                          "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
-                         "TEST": {"NAME": BASE_DIR / "test.sqlite3"}}}
+                         "TEST": {"NAME": os.getenv("LAB_TEST_DATABASE_PATH", BASE_DIR / "test.sqlite3")}}}
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -82,3 +82,4 @@ LAB_FETCH_SECONDS = float(os.getenv('LAB_FETCH_SECONDS', '60'))
 LAB_CACHE_HOURS = float(os.getenv('LAB_CACHE_HOURS', '24'))
 LAB_EVALUATION_SECONDS = float(os.getenv('LAB_EVALUATION_SECONDS', '45'))
 LAB_MAX_REFITS = int(os.getenv('LAB_MAX_REFITS', '300'))
+LAB_ARTIFACT_ROOT = Path(os.getenv("LAB_ARTIFACT_ROOT", str(BASE_DIR / ".local" / "research")))

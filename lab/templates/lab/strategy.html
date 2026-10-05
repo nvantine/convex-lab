@@ -1,0 +1,9 @@
+{% extends 'lab/base.html' %}
+{% block content %}
+<h1>{{ revision.name }}</h1>
+<p>{{ revision.description }}</p>
+<dl class="metrics"><dt>Interface</dt><dd>{{ revision.interface }}</dd><dt>Entry point</dt><dd><code>{{ revision.entry_point }}</code></dd><dt>Source checksum</dt><dd><code>{{ revision.digest }}</code></dd></dl>
+<p>Trusted local Python. This source revision is frozen; registering changes creates another revision.</p>
+<section><h2>Associated runs and tests</h2><ul>{% for run in runs %}<li><a href="{% url 'research_run' run.pk %}">{{ run.name }}</a> · {{ run.kind }} · {{ run.status }}</li>{% empty %}<li>No runs yet.</li>{% endfor %}</ul></section>
+<section><h2>Source bundle</h2>{% for path, text in revision.sources.items %}<details><summary>{{ path }}</summary><pre>{{ text }}</pre></details>{% endfor %}</section>
+{% endblock %}

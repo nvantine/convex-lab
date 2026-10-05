@@ -82,5 +82,6 @@ h1, h2, h3, h4 { overflow-wrap: anywhere; }
 input[type="checkbox"] { width: auto; margin-right: .4rem; }
 .difference th { background: #fff4e8; }
 nav { flex-wrap: wrap; }
+.report-text { white-space: pre-wrap; }
 
 .compare-table { min-width: 650px; }

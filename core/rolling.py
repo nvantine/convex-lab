@@ -167,6 +167,10 @@ def portfolio_path(
     seconds=45,
     maximum_refits=300,
     stop_after=None,
+    strategy=None,
+    artifact_dir=None,
+    seed=42,
+    windows=None,
 ):
     options = evaluation_settings(options or {})
     mode = options.get("mode", "fixed")
@@ -178,14 +182,14 @@ def portfolio_path(
     weights = np.asarray(weights, dtype=float)
     if weights.shape != (len(payload["symbols"]),) or not np.isfinite(weights).all():
         raise ProblemError("Choose one finite weight per asset.")
-    span = split_windows(payload)[window]
+    span = (windows or split_windows(payload))[window]
     all_prices = price_frame(payload)
     prices = all_prices.iloc[span["start"] + 1 : span["end"] + 1]
     scheduled = set(rebalance_indices(prices.index, frequency))
     if stop_after is not None:
         prices = prices.iloc[:stop_after]
         scheduled = {i for i in scheduled if i < len(prices)}
-    if mode == "rolling":
+    if mode == "rolling" and strategy is None:
         if spec is None or "objective" not in spec:
             raise ProblemError(
                 "Rolling optimization needs a saved scalar problem or chosen frontier solution."
@@ -210,10 +214,36 @@ def portfolio_path(
     status = "complete"
     warnings = []
     initial_weights = None
+    state = None
+    rng = np.random.default_rng(seed)
     for i, (day, row) in enumerate(prices.iterrows()):
         target = weights.copy()
         refit_index = None
-        if i in scheduled and mode == "rolling":
+        if i in scheduled and strategy is not None:
+            from pathlib import Path
+            from core.research import StrategyContext, StrategyDecision, clean_json
+            signal_index = span["start"] + i
+            lookback = options.get("lookback", 126)
+            if type(lookback) is not int or not 2 <= lookback <= signal_index:
+                raise ProblemError("Strategy lookback must fit the available past return observations.")
+            history = all_prices.iloc[signal_index-lookback:signal_index+1].copy()
+            drifting = units * all_prices.iloc[signal_index].to_numpy() / previous_equity
+            context = StrategyContext(history, tuple(payload["symbols"]),
+                str(all_prices.index[signal_index].date()),
+                dict(zip(payload["symbols"], drifting.tolist())), rng, Path(artifact_dir or "."))
+            decision = strategy(context, state)
+            if not isinstance(decision, StrategyDecision) or set(decision.weights) != set(payload["symbols"]):
+                raise ProblemError("Strategy must return StrategyDecision with one named weight per asset.")
+            target = np.asarray([decision.weights[s] for s in payload["symbols"]], dtype=float)
+            if target.shape != weights.shape or not np.isfinite(target).all():
+                raise ProblemError("Strategy weights must be a finite vector matching the asset order.")
+            state = decision.state
+            refit_index = len(refits)
+            refits.append({"signal_index":signal_index, "signal_date":context.signal_date,
+                "trade_date":str(day.date()), "lookback":lookback,
+                "history_digest":content_digest(history.to_numpy().tolist()),
+                "diagnostics":clean_json(decision.diagnostics)})
+        elif i in scheduled and mode == "rolling":
             if monotonic() - start >= seconds:
                 status = "budget_exhausted"
                 warnings.append(
@@ -301,7 +331,7 @@ def portfolio_path(
                 {
                     "date": str(day.date()),
                     "signal_date": payload["dates"][span["start"] + i]
-                    if mode == "rolling"
+                    if mode == "rolling" or strategy is not None
                     else None,
                     "weights": target.tolist(),
                     "units": units.tolist(),
