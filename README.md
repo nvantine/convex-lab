@@ -4,12 +4,12 @@ An editable convex optimization notebook. Every example is a symbolic problem:
 variables, named constants, an objective, and constraints. The same parsed
 expressions produce the CVXPY problem and its displayed KaTeX mathematics.
 
-**Milestones 1–3:** click-to-edit LaTeX or expression input, 13 editable examples,
-DCP explanations, CLARABEL/OSQP/SCS, weighted-sum and epsilon Pareto exploration,
-2D/3D/multiple-criterion charts, immutable chosen solutions, duals, and isolated
-guest workspaces, Alpaca/yfinance historical snapshots, training-only covariance
-estimates, and signed fixed-holdings evaluation. Comparisons and server-demo setup
-are the next milestone. There are no trading endpoints, jobs, workers, or CLI.
+**Milestones 1–4:** editable LaTeX/expression problems, DCP explanations, 13
+examples, solver evidence/duals, Pareto exploration, chosen solutions, isolated
+guest workspaces, resumable Alpaca/yfinance batches with local caching, signed
+historical rebalancing and rolling re-optimization, saved-result comparisons,
+and a concrete server demo guide. Historical market data only; no trading
+endpoints, general job queue, background worker, or agent CLI.
 
 ## Run locally with uv
 
@@ -23,8 +23,8 @@ uv run python manage.py create_guest
 uv run python manage.py runserver 127.0.0.1:8020
 ```
 
-Open http://127.0.0.1:8020 and log in. The guest has already been created on this
-laptop; its credentials are in `.local/guest-login.txt`. Open that file locally.
+Open http://127.0.0.1:8020 and log in. `create_guest` writes credentials to `.local/guest-login.txt`; open that file
+locally. On this development laptop the guest has already been created.
 The command never prints the password and rerunning it does not reset it.
 `.local/`, `.env`, databases, and secrets are ignored by Git.
 
@@ -34,7 +34,7 @@ See [credential setup and the data walkthrough](docs/milestone-3.md).
 The development secret is generated in
 `.local/django-secret`. For your future server, set a new private secret,
 `DJANGO_DEBUG=false`, explicit allowed hosts, and HTTPS; do not use runserver for
-hosting. Server setup is a later milestone.
+hosting. Follow [the server demo guide](docs/server-demo.md).
 
 ## Try the editor
 
@@ -75,15 +75,26 @@ editable portfolio problem from training estimates; choose sample or Ledoit–Wo
 covariance and an optional lookback. Every equation and constant stays editable.
 Displays use the minimum grouping needed to preserve mathematical meaning.
 
-Solve, then **Evaluate fixed holdings** on validation. Choose explicit entry
-costs, short borrow, cash financing, and the risk-free rate for Sharpe. Compare
-with equal weight using equity/drawdown charts. This is a fixed-holdings test,
-with no rebalances/refits or exit fee. Adjusted prices approximate total returns.
+Solve, then **Evaluate historical portfolio**. The default **Rolling
+re-optimization** re-solves your exact edited problem on a monthly schedule using
+126 preceding return observations. Choose daily, weekly, monthly, or hold after
+entry, and map which parameters to update. **Restore original weights** supports
+trading back to the saved allocation instead. Signed portfolios include explicit
+short-borrow, negative-cash financing, and transaction costs on every trade.
+Inspect the trade ledger and each re-solve's math and duals. Adjusted prices
+approximate total-return exposure; no real trading takes place.
+
+Fetch up to 100 actual stock/ETF tickers in batches of 1–5. The progress page
+saves successes locally, supports pause/resume and individual retries, and opens
+the completed dataset automatically. Daily owner refresh uses an optional
+[after-close server timer](docs/server-demo.md). **Compare** saved experiments
+and evaluations using a metrics table, flagged assumptions, and linked equity /
+drawdown charts. See [the current walkthrough and methodology](docs/milestone-4.md).
 
 The split is chronological 60/20/20. Training alone estimates parameters;
 validation supports exploration. Final prices are hidden until an explicit
 confirmation saves one frozen holdout evaluation per identical data fingerprint.
-See [assumptions, accounting, and limitations](docs/milestone-3.md).
+See [current assumptions, accounting, and limitations](docs/milestone-4.md).
 
 ## Code map
 
@@ -98,9 +109,12 @@ See [assumptions, accounting, and limitations](docs/milestone-3.md).
 - `core/presets.py`: ordinary editable problem definitions.
 - `core/providers.py`, `data.py`: historical clients, immutable price payloads,
   chronological windows, and training estimates without Django imports.
-- `core/evaluation.py`: signed fixed units, entry fees, carry, and metrics.
+- `core/evaluation.py`, `rolling.py`: metrics, signed units, exact trade fees,
+  schedules, past-only refits, and historical ledgers.
+- `core/comparison.py`, `lab/comparison_views.py`: differences and linked charts.
+- `lab/fetching.py`, `refresh_datasets`: durable batches, cache and daily refresh.
 - `lab/`: forms and views coordinate requests; models store drafts/snapshots.
-  `data_views.py` handles the new data/evaluation flows. Four custom models total.
+  `data_views.py` handles the new data/evaluation flows. Five custom models total (including mutable fetch progress).
   Templates use one base and a shared math partial; JavaScript uses the DOM only.
 - `config/`: standard Django configuration, routing, and private local settings.
 - `tests/`: analytic math tests, Django requests, and real-browser interactions.
@@ -128,11 +142,13 @@ yfinance fetches are serialized because of the library's shared cookie/session
 state; a concurrent request receives a retry message rather than waiting in a queue.
 
 The owner can adjust `LAB_MAX_VARIABLE_ENTRIES` (5000),
-`LAB_MAX_PARAMETER_ENTRIES` (100000), `LAB_MAX_AST_NODES` (500), and
+`LAB_MAX_PARAMETER_ENTRIES` (500000), `LAB_MAX_AST_NODES` (500), and
 `LAB_SOLVE_SECONDS` (2), `LAB_MAX_CRITERIA` (8), `LAB_MAX_FRONTIER_SAMPLES` (50),
-and `LAB_FRONTIER_SECONDS` (20), `LAB_MAX_ASSETS` (20), `LAB_MAX_PRICE_ROWS` (5000),
-and `LAB_FETCH_SECONDS` (20) in `.env`. Restart after changes. These limit
-request workload. The sweep budget checks between solves; compilation can add time.
+and `LAB_FRONTIER_SECONDS` (20), `LAB_MAX_ASSETS` (100), `LAB_MAX_PRICE_ROWS` (5000),
+and `LAB_FETCH_SECONDS` (60 per batch), `LAB_CACHE_HOURS` (24),
+`LAB_EVALUATION_SECONDS` (45), and `LAB_MAX_REFITS` (300) in `.env`. Restart after changes. These limit
+request workload. `LAB_MAX_REQUEST_BYTES` (12000000) allows editable large scenario
+arrays. The sweep budget checks between solves; compilation can add time.
 
 ## Tests and screenshots
 
@@ -145,16 +161,16 @@ uv run pytest -q -m browser
 ```
 
 Browser tests use a temporary database and synthetic examples, with no market API
-calls or credentials. Fifteen reviewed screenshots are saved under
-`screenshots/milestone-3/`; milestones 1 and 2 retain their historical screenshots.
+calls or credentials. Fourteen new reviewed screenshots are in `screenshots/milestone-4/`; earlier
+milestone screenshots are retained as historical records.
 Regression-only images go into ignored `.local/browser-regression/` and
 `.local/browser-regression-m2/`. Run `uv run pytest -m '' -q` for the complete
 serial suite; do not run two Django test processes against the same test database.
-Milestone 3 verification: 232 unit/Django tests and 6 Chromium browser tests
+Milestone 4 verification: 291 total tests (including 8 Chromium workflows)
 passed; Django checks and migration consistency checks passed. Five guest
 browser contexts solved simultaneously and could not open one another's results.
-Live historical checks for both Alpaca and yfinance returned 60 SPY price dates
-for January–March 2025. Unit tests cover provider failures without network calls.
+Live historical checks for both Alpaca and yfinance returned 1256 price dates
+for each of five ETFs over five years. Unit tests cover provider failures without network calls.
 See [the short code/math walkthrough](docs/milestone-1.md).
 For an existing Chromium-based browser, optionally set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/browser` before the browser test command.
