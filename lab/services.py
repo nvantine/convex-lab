@@ -32,11 +32,16 @@ def save_problem(scope, name, spec, draft=None):
     return draft
 
 
-def training_problem(scope, dataset, preset="min-variance", estimator="ledoit-wolf", lookback=None):
+def training_spec(dataset, preset="min-variance", estimator="ledoit-wolf", lookback=None):
     spec, estimate, digest = problem_from_training(dataset.prices, preset, estimator, lookback)
     spec["data"] = {"dataset_id": str(dataset.pk), "dataset_digest": dataset.digest,
                     "symbols": dataset.prices["symbols"], "estimation": estimate,
                     "estimates_digest": digest}
+    return spec
+
+
+def training_problem(scope, dataset, preset="min-variance", estimator="ledoit-wolf", lookback=None):
+    spec = training_spec(dataset, preset, estimator, lookback)
     return save_problem(scope, (dataset.name + " · " + preset)[:120], spec)
 
 
@@ -101,7 +106,7 @@ def provenance_notice(experiment):
     return "Imported estimates and scenarios are unchanged and use training observations only."
 
 
-def save_evaluation(scope, experiment, dataset, variable, window, options, seconds=None, evaluator=None, run=None):
+def save_evaluation(scope, experiment, dataset, variable, window, options, seconds=None, evaluator=None, run=None, maximum_refits=None):
     if window == "holdout":
         existing = scope.query(Evaluation).filter(dataset_digest=dataset.digest, window="holdout").first()
         if existing:
@@ -115,7 +120,7 @@ def save_evaluation(scope, experiment, dataset, variable, window, options, secon
     try:
         result = (evaluator or evaluate_portfolios)(dataset.prices, weights, window, options, experiment.spec,
             variable, limits(), seconds=seconds or settings.LAB_EVALUATION_SECONDS,
-            maximum_refits=settings.LAB_MAX_REFITS)
+            maximum_refits=maximum_refits if maximum_refits is not None else settings.LAB_MAX_REFITS)
     except BaseException as error:
         if run:
             from lab import research
@@ -134,6 +139,7 @@ def save_evaluation(scope, experiment, dataset, variable, window, options, secon
         if run:
             from lab import research
             from core.research import portfolio_report
-            research.finish(run, portfolio_report(result), evaluation=saved, experiment=experiment)
+            status = "complete" if result["portfolio"]["status"] == "complete" else "partial"
+            research.finish(run, portfolio_report(result), status, evaluation=saved, experiment=experiment)
         return saved
     return Evaluation.objects.create(**defaults)

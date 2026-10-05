@@ -1,0 +1,6 @@
+{% extends 'lab/base.html' %}
+{% block content %}
+<h1>Research gallery</h1>
+<p>Selected reports shared by the owner. Browsing them does not run code or change your workspace.</p>
+<ul>{% for run in runs %}<li><a href="{% url 'gallery_run' run.pk %}">{{ run.name }}</a> · {{ run.kind }} · {{ run.status }}</li>{% empty %}<li>No reports published yet.</li>{% endfor %}</ul>
+{% endblock %}

@@ -13,7 +13,7 @@
 <tr><th>Validation</th><td>{{ windows.validation.first }}</td><td>{{ windows.validation.last }}</td><td>{{ windows.validation.count }}</td></tr>
 <tr><th>Final holdout</th><td>{{ windows.holdout.first }}</td><td>{{ windows.holdout.last }}</td><td>{{ windows.holdout.count }}</td></tr>
 </tbody></table></div>
-{% if holdout %}<p class="notice">The final holdout has been opened for this snapshot. <a href="{% url 'evaluation' holdout.pk %}">View its frozen evaluation</a>. Further validation is exploratory.</p>{% else %}<p class="success">Final holdout locked. Its prices and returns are not included in this page.</p>{% endif %}
+{% if holdout %}<p class="notice">The final holdout has been opened for this snapshot. <a href="{% url 'evaluation' holdout.pk %}">View its frozen evaluation</a>. Further validation is exploratory.</p>{% elif holdout_run %}<p class="notice">The final holdout opening is recorded by the website or CLI. <a href="{% url 'research_run' holdout_run.pk %}">Inspect the saved opening and its status</a>. Its prices are not embedded in this page.</p>{% else %}<p class="success">Final holdout locked. Its prices and returns are not included in this page.</p>{% endif %}
 <button type="button" class="expand-chart" data-target="dataset-chart">Expand chart</button>
 <div id="dataset-chart" class="chart" data-chart="dataset-figure"></div>{{ chart|json_script:'dataset-figure' }}
 <p><small>The dashed line ends training; the chart ends at validation. Prices normalized to 1 show price ratios, not an executed portfolio.</small></p>

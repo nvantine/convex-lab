@@ -33,11 +33,15 @@ def execute(request):
     if request["interface"] == "portfolio":
         chosen = portfolio_path(payload, [0.] * len(payload["symbols"]), request["window"],
             request["options"], strategy=lambda context, state: callback(context, params, state),
-            artifact_dir=artifact_dir, seed=seed, windows=request["windows"])
+            artifact_dir=artifact_dir, seed=seed, windows=request["windows"],
+            maximum_refits=request["maximum_refits"])
         benchmark = portfolio_path(payload, [1/len(payload["symbols"])] * len(payload["symbols"]),
             request["window"], {**request["options"], "mode":"fixed"}, stop_after=len(chosen["wealth"]),
             windows=request["windows"])
-        return portfolio_report({"portfolio":chosen, "equal_weight":benchmark})
+        result = portfolio_report({"portfolio":chosen, "equal_weight":benchmark})
+        result["equations"] = list(dict.fromkeys(eq for refit in chosen["refits"]
+            for eq in refit.get("diagnostics",{}).get("equations",[])))
+        return result
     prices = price_frame(payload) if payload else None
     # Registration passes an already-redacted price payload. Keep original spans
     # supplied by the parent; recomputing 60/20/20 on a truncated series is wrong.

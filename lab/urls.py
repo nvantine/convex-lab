@@ -3,6 +3,9 @@ from lab import views, data_views, comparison_views
 from lab import research_views
 
 urlpatterns = [
+               path("gallery/",research_views.gallery,name="gallery"),
+               path("gallery/<uuid:pk>/",research_views.gallery_run,name="gallery_run"),
+               path("research/<uuid:pk>/publication/",research_views.publication,name="publication"),
                path("research/",research_views.research_index,name="research_index"),
                path("research/<uuid:pk>/",research_views.research_run,name="research_run"),
                path("research/<uuid:pk>/status/",research_views.run_status,name="run_status"),

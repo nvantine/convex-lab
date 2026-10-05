@@ -6,6 +6,8 @@ the same as the symbolic portfolio engine (Boyd & Vandenberghe §4.4.1).
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
+import hashlib
+from uuid import UUID
 import numpy as np
 import pandas as pd
 from plotly.utils import PlotlyJSONEncoder
@@ -20,6 +22,7 @@ class StrategyContext:
     current_weights: dict[str, float]
     rng: np.random.Generator
     artifact_dir: Path
+    options: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -51,14 +54,30 @@ class ResearchResult:
 
 def clean_json(value):
     """Convert NumPy/Plotly values, then reject nonfinite JSON evidence."""
-    encoded = json.dumps(value, default=PlotlyJSONEncoder().default, allow_nan=False)
+    def convert(item):
+        if isinstance(item, (UUID, Path)): return str(item)
+        return PlotlyJSONEncoder().default(item)
+    encoded = json.dumps(value, default=convert, allow_nan=False)
     return json.loads(encoded)
+
+
+def file_checksum(path):
+    """Stream model artifacts rather than loading potentially large files."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        while True:
+            chunk = stream.read(1024*1024)
+            if not chunk: break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def result_payload(result):
     if not isinstance(result, ResearchResult):
         raise ProblemError("Research entry point must return core.research.ResearchResult.")
     payload = clean_json(vars(result))
+    if not isinstance(payload["metrics"],dict) or any(not isinstance(payload[key],list) for key in ("tables","charts","equations","artifacts")):
+        raise ProblemError("Metrics must be an object; tables, charts, equations, and artifacts must be lists.")
     for name, metric in payload["metrics"].items():
         if not isinstance(name, str) or not isinstance(metric, dict):
             raise ProblemError("Each metric needs an object with value, unit, and optional direction.")
@@ -72,6 +91,8 @@ def result_payload(result):
             raise ProblemError("Tables require columns and rows lists.")
         if any(not isinstance(row, list) or len(row) != len(table["columns"]) for row in table["rows"]):
             raise ProblemError("Each table row must match its columns.")
+        if any(not isinstance(column,str) for column in table["columns"]) or not isinstance(table.get("title",""),str):
+            raise ProblemError("Table columns and titles must be strings.")
     import plotly.graph_objects as go
     for chart in payload["charts"]:
         if not isinstance(chart, dict) or "figure" not in chart:
@@ -79,7 +100,7 @@ def result_payload(result):
         go.Figure(chart["figure"])  # Validate; never accept executable HTML.
     if not isinstance(payload["text"], str) or any(not isinstance(x, str) for x in payload["equations"] + payload["artifacts"]):
         raise ProblemError("Report text, equations, and artifact paths must be strings.")
-    return {"schema_version": 1, "provenance": "script-reported", **payload}
+    return {**payload, "schema_version": 1, "provenance": "script-reported"}
 
 
 def portfolio_report(result):

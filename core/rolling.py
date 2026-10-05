@@ -198,10 +198,10 @@ def portfolio_path(
             raise ProblemError(
                 "The scenario auxiliary cannot be the asset-weight variable."
             )
-        if len(scheduled) > maximum_refits:
-            raise ProblemError(
-                f"This schedule needs {len(scheduled)} solves; the current request limit is {maximum_refits}. Use a less frequent schedule or adjust the owner budget."
-            )
+    if mode == "rolling" and len(scheduled) > maximum_refits:
+        raise ProblemError(
+            f"This schedule needs {len(scheduled)} refits; the current request limit is {maximum_refits}. Use a less frequent schedule or adjust the owner budget."
+        )
     units = np.zeros(len(weights))
     cash = 1.0
     previous_equity = 1.0
@@ -217,9 +217,9 @@ def portfolio_path(
     state = None
     rng = np.random.default_rng(seed)
     for i, (day, row) in enumerate(prices.iterrows()):
-        target = weights.copy()
+        target = initial_weights.copy() if strategy is not None and mode == "fixed" and initial_weights is not None else weights.copy()
         refit_index = None
-        if i in scheduled and strategy is not None:
+        if i in scheduled and strategy is not None and (i == 0 or mode == "rolling"):
             from pathlib import Path
             from core.research import StrategyContext, StrategyDecision, clean_json
             signal_index = span["start"] + i
@@ -230,7 +230,7 @@ def portfolio_path(
             drifting = units * all_prices.iloc[signal_index].to_numpy() / previous_equity
             context = StrategyContext(history, tuple(payload["symbols"]),
                 str(all_prices.index[signal_index].date()),
-                dict(zip(payload["symbols"], drifting.tolist())), rng, Path(artifact_dir or "."))
+                dict(zip(payload["symbols"], drifting.tolist())), rng, Path(artifact_dir or "."), dict(options))
             decision = strategy(context, state)
             if not isinstance(decision, StrategyDecision) or set(decision.weights) != set(payload["symbols"]):
                 raise ProblemError("Strategy must return StrategyDecision with one named weight per asset.")
@@ -331,7 +331,7 @@ def portfolio_path(
                 {
                     "date": str(day.date()),
                     "signal_date": payload["dates"][span["start"] + i]
-                    if mode == "rolling" or strategy is not None
+                    if mode == "rolling" or strategy is not None and i == 0
                     else None,
                     "weights": target.tolist(),
                     "units": units.tolist(),

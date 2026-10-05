@@ -14,6 +14,19 @@ def number_display(value):
 
 
 @register.filter
+def short_json(value):
+    return len(json.dumps(value, default=str)) <= 400
+
+
+@register.filter
+def report_cell(value):
+    if value is None: return "Unavailable"
+    if type(value) in (float,int): return number_display(value)
+    if isinstance(value,(dict,list)): return json.dumps(value,indent=2,allow_nan=False)
+    return str(value)
+
+
+@register.filter
 def numeric_display(value):
     """Readable numeric arrays; unrounded solver values remain in the snapshot."""
     def format_value(item, depth=0):

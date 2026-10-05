@@ -28,6 +28,7 @@ include = ["core*", "lab*", "config*"]
 
 [tool.setuptools.package-data]
 lab = ["templates/lab/*.html", "static/**/*"]
+core = ["*.json"]
 
 
 [dependency-groups]

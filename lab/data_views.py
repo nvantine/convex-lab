@@ -16,7 +16,7 @@ from core.rolling import evaluate_portfolios, rebalance_indices, refit_spec
 from core.parser import ProblemError, build_problem
 from core.providers import fetch_prices, last_completed_day
 from lab.forms import DatasetForm, TrainingForm, EvaluationForm
-from lab.models import Dataset, Evaluation, Experiment, Problem, FetchRequest
+from lab.models import Dataset, Evaluation, Experiment, Problem, FetchRequest, ResearchRun
 from lab import fetching
 from lab.request_limits import SOLVE_SLOTS
 from lab.workspaces import scoped, workspace_for, request_scope
@@ -28,6 +28,10 @@ TICKET_SALT = 'convex-lab-final-holdout'
 
 def existing_holdout(request, dataset):
     return scoped(Evaluation, request).filter(dataset_digest=dataset.digest, window='holdout').first()
+
+
+def holdout_opening(request, dataset):
+    return scoped(ResearchRun, request).filter(dataset_digest=dataset.digest, holdout_claim=True).first()
 
 
 def data_fingerprint(payload, provenance):
@@ -101,7 +105,7 @@ def dataset_detail(request,pk):
                          xaxis_title='Date',yaxis_title='Adjusted-price ratio',margin=dict(l=50,r=20,t=55,b=90),
                          legend=dict(orientation='h',x=0,y=-.25))
     return render(request,'lab/dataset.html',{'dataset':dataset,'windows':windows,'form':form,'chart':figure.to_plotly_json(),
-        'holdout':existing_holdout(request,dataset)})
+        'holdout':existing_holdout(request,dataset), 'holdout_run':holdout_opening(request,dataset)})
 
 
 usable_variables = services.usable_variables
@@ -138,6 +142,10 @@ def evaluation_setup(request,pk):
                 if existing:
                     messages.info(request,'The final holdout for this snapshot is already open. Returning its frozen result.')
                     return redirect('evaluation',pk=existing.pk)
+                opening=holdout_opening(request,dataset)
+                if opening:
+                    messages.info(request,'The final holdout opening is already recorded. Showing its saved research evidence.')
+                    return redirect('research_run',pk=opening.pk)
             if form.options()['mode']=='rolling':
                 from lab.views import limits
                 window='holdout' if action=='review_holdout' else 'validation'

@@ -9,7 +9,8 @@ examples, solver evidence/duals, Pareto exploration, chosen solutions, isolated
 guest workspaces, resumable Alpaca/yfinance batches with local caching, signed
 historical rebalancing and rolling re-optimization, saved-result comparisons,
 and a concrete server demo guide. Historical market data only; no trading
-endpoints, general job queue, background worker, or agent CLI.
+endpoints, general job queue, or background worker. The research CLI adds
+trusted local Python workflows, saved tests, sweeps, and selected guest reports.
 
 ## Run locally with uv
 
@@ -96,6 +97,29 @@ validation supports exploration. Final prices are hidden until an explicit
 confirmation saves one frozen holdout evaluation per identical data fingerprint.
 See [current assumptions, accounting, and limitations](docs/milestone-4.md).
 
+## Agent and research CLI
+
+The CLI shares your staff user's notebook with the website. It supports historical
+data, symbolic solves/frontiers, trusted local Python strategies and research
+scripts, signed portfolio backtests, parameter sweeps, saved pytest evidence,
+comparisons, reports, and selected guest publication.
+
+    uv run convex-lab config YOUR_STAFF_USERNAME --site-url http://127.0.0.1:8020
+    uv run convex-lab doctor
+    uv run convex-lab capabilities
+    uv run convex-lab runs list
+
+Follow the [CLI agent guide](docs/cli-agent-guide.md) for the full workflow and SDK.
+Successful, partial, and failed research appears under **Research**. Selected
+reports appear under **Gallery**. CLI execution is foreground and local; server
+agents use the same checkout/database, and remote callers can invoke it over SSH.
+There are no account/order integrations or Python upload forms.
+
+The final holdout now records one opening before execution, including failures
+and explicit exports, across website and CLI. Source revisions and completed
+results remain frozen. [Development notes](docs/cli-development-notes.md) describe
+limitations and follow-up ideas.
+
 ## Code map
 
 - `core/parser.py`: explicit AST interpreter, declarations, shapes, domain checks,
@@ -114,8 +138,13 @@ See [current assumptions, accounting, and limitations](docs/milestone-4.md).
 - `core/comparison.py`, `lab/comparison_views.py`: differences and linked charts.
 - `lab/fetching.py`, `refresh_datasets`: durable batches, cache and daily refresh.
 - `lab/`: forms and views coordinate requests; models store drafts/snapshots.
-  `data_views.py` handles the new data/evaluation flows. Five custom models total (including mutable fetch progress).
+  `data_views.py` handles the new data/evaluation flows. Models store mutable drafts/fetch progress and frozen numerical evidence.
   Templates use one base and a shared math partial; JavaScript uses the DOM only.
+- `core/research.py`, `research_worker.py`, `workflows.py`: typed Python research
+  inputs/results, foreground execution, parameter grids, and summaries without Django.
+- `lab/cli.py`, `services.py`, `research.py`, `workflows.py`: structured commands,
+  shared web operations, versioned source, saved evidence, and campaign coordination.
+  Seven custom models total, including the new source revisions and research ledger.
 - `config/`: standard Django configuration, routing, and private local settings.
 - `tests/`: analytic math tests, Django requests, and real-browser interactions.
 

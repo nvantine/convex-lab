@@ -84,3 +84,62 @@ def test_custom_research_source_errors_and_live_update(live_server, owner, setti
         shot(page,"milestone-2","05-mobile-report")
         assert not errors
         browser.close()
+
+
+def test_sweep_mixed_comparison_and_guest_gallery(live_server, owner, guest, settings, tmp_path):
+    from lab import research
+    from lab.workflows import sweep
+    from lab.models import Dataset
+    from core.data import aligned_prices
+    from core.research import portfolio_report
+    from test_data import synthetic_frame
+    settings.LAB_ARTIFACT_ROOT = tmp_path/"artifacts"
+    scope = Scope(owner,owner_workspace(owner))
+    revision = research.register(scope,Path("examples/research"),"simulation.py:run","research","Seeded research")
+    campaign = sweep(scope,revision,None,{"params.mean":[0,1],"params.sigma":[.5,1]},[42,43],
+        {"count":40},{},"sample_mean","maximize",90)
+    payload,_=aligned_prices(synthetic_frame(),["SPY","AGG"])
+    dataset=Dataset.objects.create(owner=owner,workspace=scope.workspace,name="Comparison data",
+        source="synthetic",prices=payload,provenance={},digest="browser-cli-comparison")
+    draft=services.training_problem(scope,dataset)
+    experiment=services.solve_problem(scope,draft.name,draft.spec,draft=draft)
+    a=services.save_evaluation(scope,experiment,dataset,"w","validation",{"mode":"fixed","frequency":"weekly","cost_bps":0})
+    b=services.save_evaluation(scope,experiment,dataset,"w","validation",{"mode":"fixed","frequency":"monthly","cost_bps":30})
+    run,_=research.begin(scope,"Agent backtest evidence","backtest",{"seed":42},dataset,"validation")
+    research.finish(run,portfolio_report(b.result))
+    with sync_playwright() as p:
+        browser=p.chromium.launch(**launch_options())
+        page=browser.new_page(viewport={"width":1280,"height":900})
+        errors=[];page.on("pageerror",lambda e:errors.append(str(e)))
+        login_owner(page,live_server.url,owner)
+        page.goto(f"{live_server.url}/research/{campaign.pk}/")
+        expect(page.locator("#research-status")).to_have_text("complete")
+        expect(page.locator(".chart .main-svg").first).to_be_visible()
+        shot(page,"milestone-3","01-sweep-grid-and-seeds")
+        page.goto(f"{live_server.url}/compare/?evaluation={a.pk}&run={run.pk}")
+        expect(page.get_by_text("Different assumptions:",exact=False)).to_be_visible()
+        expect(page.locator(".chart .main-svg").first).to_be_visible()
+        shot(page,"milestone-3","02-mixed-linked-comparison")
+        page.locator("#compare-history").evaluate("el => Plotly.relayout(el, {'xaxis.range': ['2023-10-01','2023-11-01']})")
+        assert page.locator("#compare-history").evaluate("el => el.layout.xaxis.matches") == "x2"
+        page.goto(f"{live_server.url}/research/{campaign.pk}/")
+        page.get_by_role("button",name="Publish report to guest gallery").click()
+        expect(page.get_by_role("button",name="Unpublish report")).to_be_visible()
+        page.get_by_role("button",name="Log out",exact=False).click()
+        page.get_by_label("Username").fill(guest.username)
+        page.get_by_label("Password").fill("testing-passphrase-123")
+        page.get_by_role("button",name="Log in",exact=True).click()
+        page.get_by_role("link",name="Gallery",exact=True).click()
+        shot(page,"milestone-3","03-guest-gallery")
+        page.get_by_role("link",name=campaign.name,exact=True).click()
+        expect(page.locator(".chart .main-svg").first).to_be_visible()
+        assert page.get_by_role("heading",name="Saved artifacts").count()==0
+        assert page.get_by_role("heading",name="Notes",exact=True).count()==0
+        shot(page,"milestone-3","04-shared-report")
+        page.set_viewport_size({"width":390,"height":844})
+        shot(page,"milestone-3","05-mobile-shared-report")
+        response=page.goto(f"{live_server.url}/research/{campaign.pk}/")
+        assert response.status==404
+        expect(page.get_by_role("heading",name="Not Found",exact=True)).to_be_visible()
+        assert not errors
+        browser.close()

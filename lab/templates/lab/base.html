@@ -22,6 +22,7 @@
         <a href="{% url 'datasets' %}">Datasets</a>
         <a href="{% url 'compare' %}">Compare</a>
         <a href="{% url 'research_index' %}">Research</a>
+        <a href="{% url 'gallery' %}">Gallery</a>
       </nav>
       <form action="{% url 'logout' %}" method="post">{% csrf_token %}<button>Log out {{ user.username }}</button></form>
     {% endif %}

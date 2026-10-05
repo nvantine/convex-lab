@@ -10,6 +10,34 @@ class CLIError(Exception):
     pass
 
 
+class ExecutionFailure(Exception):
+    pass
+
+
+def saved_error(error, run, error_type=ExecutionFailure):
+    """Keep failed run links machine-readable as well as readable in a terminal."""
+    from lab.research import redact
+    failure = error_type(f"{redact(str(error))} Saved run: {run.pk}; {url('research_run', run.pk)}")
+    failure.run_id = str(run.pk)
+    failure.run_url = url("research_run", run.pk)
+    return failure
+
+
+def symbolic_report(saved):
+    report = {"schema_version":1, "provenance":"CVXPY", "metrics":{
+        "objective_value":{"value":saved.result.get("optimal_value"), "unit":"objective",
+                           "direction":saved.spec.get("objective", {}).get("sense", "none")}},
+        "text":"Saved symbolic solution; inspect its mathematics and solver evidence.",
+        "charts":[], "tables":[], "equations":[]}
+    if saved.kind == "frontier":
+        from core.charts import frontier_charts
+        report["charts"] = [{"figure":c["figure"]} for c in frontier_charts(saved.result)]
+        return report, "complete" if saved.result["status"] == "complete" else "partial", ""
+    if not saved.result.get("verified_optimal"):
+        return report, "failed", "No verified optimum: " + saved.result["status"]
+    return report, "complete", ""
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise CLIError(message)
@@ -24,7 +52,7 @@ def read_json(value):
 
 def object_json(value):
     try:
-        result = json.loads(value)
+        result = read_json(value[1:]) if value.startswith("@") else read_json("-") if value == "-" else json.loads(value)
     except ValueError as error:
         raise CLIError("Expected a JSON object.") from error
     if not isinstance(result, dict):
@@ -37,6 +65,7 @@ def parser():
     p.add_argument("--owner", help="Django staff username; overrides local configuration")
     p.add_argument("--human", action="store_true", help="Pretty-print output")
     p.add_argument("--idempotency-key", help="Reuse the same saved run for a retried invocation")
+    p.add_argument("--input", help="JSON file or - containing an argv list")
     sub = p.add_subparsers(dest="command", required=True, parser_class=Parser)
     config = sub.add_parser("config", help="Save owner and website URL in .local/cli.json")
     config.add_argument("username"); config.add_argument("--site-url", default="http://127.0.0.1:8000")
@@ -87,6 +116,7 @@ def parser():
     cmd.add_argument("--options", type=object_json, default={})
     cmd.add_argument("--seed", type=int, default=42); cmd.add_argument("--timeout", type=float, default=600)
     cmd.add_argument("--params", type=object_json, default={})
+    cmd.add_argument("--max-refits", type=int, default=10000)
     strategies = sub.add_parser("strategies").add_subparsers(dest="action", required=True)
     strategies.add_parser("list")
     cmd = strategies.add_parser("show"); cmd.add_argument("id")
@@ -106,9 +136,27 @@ def parser():
     for name in ("show", "export", "recover", "replay"):
         cmd = runs.add_parser(name); cmd.add_argument("id")
         if name == "replay": cmd.add_argument("--allow-version-mismatch", action="store_true")
+        if name == "show": cmd.add_argument("--logs", action="store_true")
+        if name == "export": cmd.add_argument("--output", help="New directory for JSON and artifact copies")
     cmd = sub.add_parser("notes").add_subparsers(dest="action", required=True).add_parser("add")
     cmd.add_argument("id"); cmd.add_argument("--kind", choices=("finding", "bug", "idea"), default="finding")
     cmd.add_argument("--text", required=True)
+    cmd = sub.add_parser("sweep")
+    cmd.add_argument("id", help="Strategy revision, symbolic problem, or scalar experiment")
+    cmd.add_argument("--dataset"); cmd.add_argument("--grid", type=object_json, default={})
+    cmd.add_argument("--seeds", type=json.loads, default=[42])
+    cmd.add_argument("--params", type=object_json, default={}); cmd.add_argument("--options", type=object_json, default={})
+    cmd.add_argument("--metric", default="sharpe"); cmd.add_argument("--direction", choices=("maximize","minimize"), default="maximize")
+    cmd.add_argument("--timeout", type=float, default=600); cmd.add_argument("--max-trials", type=int, default=100)
+    cmd.add_argument("--variable", default="w")
+    for name in ("compare","report"):
+        cmd = sub.add_parser(name)
+        cmd.add_argument("ids", nargs="+", help="Saved run, experiment, or evaluation IDs")
+        if name == "report":
+            cmd.add_argument("--title", default="Research summary")
+            cmd.add_argument("--text", default=""); cmd.add_argument("--output", help="Optional Markdown file")
+    for name in ("publish","unpublish"):
+        cmd = sub.add_parser(name); cmd.add_argument("id")
     return p
 
 
@@ -187,7 +235,10 @@ def execute_base(args, run=None):
     if args.command == "capabilities":
         return {"commands": list(parser()._subparsers._group_actions[0].choices),
                 "atoms": sorted(ATOMS), "solvers": ["CLARABEL", "OSQP", "SCS"],
-                "interfaces": ["symbolic", "portfolio", "research"], "schema_version": 1}
+                "interfaces": ["symbolic", "portfolio", "research"], "schema_version": 1,
+                "schemas":{"research_result":json.loads((Path(__file__).resolve().parents[1]/"core"/"research.schema.json").read_text())},
+                "exit_codes":{"0":"complete", "1":"failed or partial execution", "2":"invalid input or exhausted holdout",
+                              "3":"retryable database error", "130":"interrupted"}}
     if args.command == "presets":
         return get_preset(args.name) if args.name else {key: value[0] for key, value in PRESETS.items()}
     if args.command == "doctor":
@@ -250,12 +301,8 @@ def execute_base(args, run=None):
         if args.action == "clone":
             return snapshot(services.save_problem(scope, (draft.name + " (copy)")[:120], draft.spec))
         if args.dataset:
-            record = services.training_problem(scope, get_record(scope, Dataset, args.dataset),
+            spec = services.training_spec(get_record(scope, Dataset, args.dataset),
                 args.template, args.estimator, args.lookback)
-            if draft:
-                # Reuse the original draft rather than leave an extra imported draft.
-                spec = record.spec; record.delete()
-            else: spec = record.spec; draft = record
         else:
             spec = convert_spec(read_json(args.file) if args.file else get_preset(args.preset),
                                 args.language, services.limits())
@@ -278,7 +325,8 @@ def execute_base(args, run=None):
                    "scenario_count_parameter": "scenario_count", "previous_weights_parameter": "w_prev",
                    "scenario_variable": "u"}.items() if v in
                    [d["name"] for d in experiment.spec["parameters"] + experiment.spec["variables"]]}, **args.options}
-        return snapshot(services.save_evaluation(scope, experiment, dataset, args.variable, args.window, options, run=run))
+        return snapshot(services.save_evaluation(scope, experiment, dataset, args.variable, args.window, options,
+            seconds=args.timeout, maximum_refits=args.max_refits, run=run))
     raise CLIError("Unknown command.")
 
 
@@ -290,6 +338,51 @@ def execute(args):
     if args.command in ("config", "doctor", "capabilities", "presets", "whoami"):
         return execute_base(args)
     scope = scope_for(args)
+    if args.command in ("publish","unpublish"):
+        run = get_record(scope, ResearchRun, args.id)
+        if run.status not in ("complete","partial"): raise CLIError("Publish a completed or partial report.")
+        run.published = args.command == "publish"; run.save(update_fields=["published"])
+        return {**snapshot(run), "published":run.published,
+                "gallery_url":url("gallery_run",run.pk) if run.published else None}
+    if args.command == "sweep":
+        from lab.workflows import sweep
+        target = None
+        for model in (StrategyRevision,Problem,Experiment):
+            try: target = get_record(scope,model,args.id); break
+            except CLIError: pass
+        if target is None: raise CLIError("No strategy, problem, or scalar experiment with that ID.")
+        dataset = get_record(scope,Dataset,args.dataset) if args.dataset else None
+        if not 0 < args.timeout <= 86400: raise CLIError("Timeout must be between 0 and 86400 seconds.")
+        return snapshot(sweep(scope,target,dataset,args.grid,args.seeds,args.params,args.options,args.metric,
+                              args.direction,args.timeout,args.max_trials,args.idempotency_key,args.variable))
+    if args.command in ("compare","report"):
+        from lab.comparison_views import comparison_context
+        from urllib.parse import urlencode
+        selection = {"run":[],"experiment":[],"evaluation":[]}
+        for pk in args.ids:
+            for name,model in (("run",ResearchRun),("experiment",Experiment),("evaluation",Evaluation)):
+                try: item = get_record(scope,model,pk)
+                except CLIError: continue
+                selection[name].append(str(item.pk)); break
+            else: raise CLIError("A selected ID is absent from your workspace.")
+        context = comparison_context(scope,selection)
+        compare_url = local_config()[1].get("site_url","http://127.0.0.1:8000").rstrip("/")+"/compare/?"+urlencode(selection,doseq=True)
+        data = {k:context[k] for k in ("records","rows","metrics","charts","differences")}
+        if args.command == "compare":
+            from core.research import clean_json
+            return {**clean_json(data), "url":compare_url}
+        report = {"schema_version":1,"provenance":"research summary","metrics":{},
+            "text":args.text + ("\nDifferent assumptions: "+", ".join(context["differences"]) if context["differences"] else ""),
+            "equations":[], "charts":[{"figure":c["figure"]} for c in context["charts"]],
+            "tables":[{"title":"Selected results","columns":["Metric",*[r["name"] for r in context["records"]]],
+                       "rows":[[r["name"],*r["values"]] for r in context["metrics"]]}]}
+        run, created = research.begin(scope,args.title,"report",{"selection":selection,"text":args.text},
+                                      idempotency_key=args.idempotency_key)
+        if created: research.finish(run,report)
+        markdown = "# "+args.title+"\n\n"+args.text+"\n\n[Interactive comparison]("+compare_url+")\n\n"
+        markdown += "\n".join("- "+row["name"]+": "+", ".join(str(v) for v in row["values"]) for row in context["metrics"])
+        if args.output: Path(args.output).expanduser().write_text(markdown)
+        return {**snapshot(run),"markdown":markdown,"comparison_url":compare_url}
     if args.command == "strategies":
         if args.action == "list":
             return [{**snapshot(r), "interface":r.interface, "entry_point":r.entry_point} for r in scope.query(StrategyRevision)]
@@ -304,8 +397,31 @@ def execute(args):
         run = get_record(scope, ResearchRun, args.id)
         if args.action == "recover": return snapshot(research.recover(run))
         if args.action == "replay": return replay(scope, run, args)
-        return {**snapshot(run), "config":run.config, "runtime":run.runtime, "artifacts":run.artifacts,
+        data = {**snapshot(run), "config":run.config, "runtime":run.runtime, "artifacts":run.artifacts,
                 "notes":run.notes, "error":run.error, "revision_id":str(run.revision_id) if run.revision_id else None}
+        if args.action == "show" and args.logs:
+            from django.conf import settings
+            folder = settings.LAB_ARTIFACT_ROOT / str(run.pk)
+            data["logs"] = {name:research.redact((folder/name).read_text()) if (folder/name).exists() else ""
+                            for name in ("stdout.log","stderr.log")}
+        if args.action == "export" and args.output:
+            from django.conf import settings
+            import shutil
+            folder = Path(args.output).expanduser()
+            folder.mkdir(parents=True,exist_ok=False)
+            root = settings.LAB_ARTIFACT_ROOT / str(run.pk)
+            for item in run.artifacts:
+                source = root/item["path"]
+                if not source.resolve().is_relative_to(root.resolve()):
+                    raise CLIError("Invalid artifact path.")
+                from core.research import file_checksum
+                if file_checksum(source)!=item["sha256"]:
+                    raise CLIError("Artifact checksum differs; export stopped.")
+                destination=folder/item["path"];destination.parent.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(source,destination)
+            (folder/"run.json").write_text(json.dumps(data,allow_nan=False,indent=2))
+            data["export_directory"]=str(folder.resolve())
+        return data
     if args.command == "notes":
         from django.db import transaction
         from django.utils import timezone
@@ -337,6 +453,7 @@ def execute(args):
     if window == "holdout" and dataset is None: raise CLIError("Holdout research requires --dataset.")
     if hasattr(args, "seed") and not 0 <= args.seed < 2**32: raise CLIError("Seed must be between 0 and 2^32-1.")
     if hasattr(args, "timeout") and not 0 < args.timeout <= 86400: raise CLIError("Timeout must be positive and at most 86400 seconds.")
+    if hasattr(args, "max_refits") and args.max_refits < 1: raise CLIError("--max-refits must be positive.")
     if args.command in ("solve", "frontier"):
         draft = get_record(scope, Problem, args.id); config["spec"] = draft.spec
     if args.command == "tests" and (not isinstance(args.pytest_args, list) or any(not isinstance(x,str) for x in args.pytest_args)):
@@ -352,64 +469,96 @@ def execute(args):
                 if args.command == "tests":
                     research.run_tests(run, args.timeout, args.pytest_args)
                 else:
-                    options = {"mode":"fixed", "frequency":"monthly", "lookback":126, **getattr(args, "options", {})}
+                    options = {"mode":"rolling", "frequency":"monthly", "lookback":126, **getattr(args, "options", {})}
                     research.run_python(run, args.params, options, args.seed, args.timeout)
                 return snapshot(run)
             output = execute_base(args, run=run)
             links = {}
+            status, failure = "complete", ""
             if args.command in ("solve", "frontier", "choose"):
                 saved = get_record(scope, Experiment, output["id"]); links["experiment"] = saved
-                report = {"schema_version":1, "provenance":"CVXPY", "metrics":{
-                    "objective_value":{"value":saved.result.get("optimal_value"), "unit":"objective", "direction":saved.spec.get("objective", {}).get("sense", "none")}},
-                    "text":"Saved symbolic solution; inspect its mathematics and solver evidence.", "charts":[], "tables":[], "equations":[]}
-                if saved.kind == "frontier":
-                    from core.charts import frontier_charts
-                    report["charts"] = [{"figure":c["figure"]} for c in frontier_charts(saved.result)]
+                report, status, failure = symbolic_report(saved)
             elif args.command == "backtest":
                 saved = get_record(scope, Evaluation, output["id"]); links.update(evaluation=saved, experiment=saved.experiment)
                 report = portfolio_report(saved.result)
+                if saved.result["portfolio"]["status"] != "complete": status = "partial"
             else:
                 report = {"schema_version":1, "provenance":"data operation", "metrics":{}, "operation":output}
+                if args.command == "datasets" and args.action != "export" and (output.get("errors") or not output.get("dataset")):
+                    status = "partial"
             if run.status == "running":
-                research.finish(run, report, **links)
-            return {**output, "run_id":str(run.pk), "run_url":url("research_run", run.pk)}
+                research.finish(run, report, status, failure, **links)
+            return {**output, "status":run.status, "run_id":str(run.pk), "run_url":url("research_run", run.pk)}
     except Exception as error:
-        raise CLIError(f"{research.redact(str(error))} Saved run: {run.pk}; {url('research_run', run.pk)}") from error
+        error_type = CLIError if args.command in ("solve","frontier") and isinstance(error,ProblemError) else ExecutionFailure
+        raise saved_error(error,run,error_type) from error
 
 
 def replay(scope, original, args):
     from lab import research
     if original.holdout_claim:
         raise CLIError("Final holdout runs cannot be replayed as another untouched test.")
-    if research.runtime_versions()["packages"] != original.runtime.get("packages") and not args.allow_version_mismatch:
-        raise CLIError("Dependency versions differ. Restore recorded versions or pass --allow-version-mismatch.")
+    current = research.runtime_versions()
+    if any(current[key] != original.runtime.get(key) for key in ("python","packages","app_code_digest")) and not args.allow_version_mismatch:
+        raise CLIError("Runtime versions or application code differ. Restore recorded versions or pass --allow-version-mismatch.")
     config = {**original.config, "replay_of":str(original.pk)}
-    run, _ = research.begin(scope, original.name + " · replay", original.kind, config, original.dataset,
+    run, created = research.begin(scope, original.name + " · replay", original.kind, config, original.dataset,
                             original.window, original.revision, idempotency_key=args.idempotency_key)
-    with research.evidence(run):
-        if original.revision:
-            if original.kind == "tests":
-                research.run_tests(run, config.get("timeout",600), config.get("pytest_args",[]))
+    if not created: return snapshot(run)
+    try:
+        with research.evidence(run):
+            if original.revision:
+                if original.kind == "tests":
+                    research.run_tests(run, config.get("timeout",600), config.get("pytest_args",[]))
+                else:
+                    options = {"mode":"rolling", "frequency":"monthly", "lookback":126, **config.get("options",{})}
+                    research.run_python(run, config.get("params",{}), options, config.get("seed",42), config.get("timeout",600))
+            elif original.kind in ("solve", "frontier"):
+                from lab import services
+                saved = services.solve_problem(scope, original.name, config["spec"], config["solver"], config.get("options"))
+                report,status,failure=symbolic_report(saved)
+                research.finish(run,report,status,failure,experiment=saved)
+            elif original.kind == "backtest" and original.evaluation:
+                from lab import services
+                from core.research import portfolio_report
+                saved = services.save_evaluation(scope,original.experiment,original.dataset,original.evaluation.variable,
+                    "validation",original.evaluation.result["portfolio"]["settings"],
+                    seconds=config.get("timeout",600),maximum_refits=config.get("max_refits",10000))
+                status="complete" if saved.result["portfolio"]["status"]=="complete" else "partial"
+                research.finish(run,portfolio_report(saved.result),status,experiment=original.experiment,evaluation=saved)
             else:
-                options = {"mode":"fixed", "frequency":"monthly", "lookback":126, **config.get("options",{})}
-                research.run_python(run, config.get("params",{}), options, config.get("seed",42), config.get("timeout",600))
-        elif original.kind in ("solve", "frontier"):
-            from lab import services
-            saved = services.solve_problem(scope, original.name, config["spec"], config["solver"], config.get("options"))
-            research.finish(run, {"schema_version":1,"provenance":"CVXPY", "metrics":{}}, experiment=saved)
-        else:
-            raise CLIError("Replay is supported for Python runs, tests, and symbolic solves. Repeat other commands with their frozen configuration.")
+                raise CLIError("Replay is supported for Python runs, tests, and symbolic solves. Repeat other commands with their frozen configuration.")
+    except Exception as error:
+        raise saved_error(error,run) from error
     return snapshot(run)
 
 
 def main(argv=None):
+    import signal, threading
+    previous_term = None
+    if threading.current_thread() is threading.main_thread():
+        previous_term = signal.getsignal(signal.SIGTERM)
+        def interrupted(signum, frame):
+            raise KeyboardInterrupt()
+        signal.signal(signal.SIGTERM, interrupted)
     try:
+        argv = list(sys.argv[1:] if argv is None else argv)
+        if "--input" in argv:
+            index = argv.index("--input")
+            if index+1 == len(argv): raise CLIError("--input requires a file or -.")
+            invocation = read_json(argv[index+1])
+            if not isinstance(invocation,dict) or not isinstance(invocation.get("argv"),list) or any(not isinstance(x,str) for x in invocation["argv"]):
+                raise CLIError("Invocation JSON requires an argv list of strings.")
+            argv = argv[:index]+argv[index+2:]+invocation["argv"]
         args = parser().parse_args(argv)
         configure()
         data = execute(args)
-        print(json.dumps({"schema_version": 1, "ok": True, "data": data},
+        from lab.research import redact_payload
+        data = redact_payload(data)
+        success = not (isinstance(data, dict) and data.get("status") in ("failed", "interrupted", "partial"))
+        print(json.dumps({"schema_version": 1, "ok": success, "data": data},
                          allow_nan=False, default=str, indent=2 if args.human else None))
-        return 1 if isinstance(data, dict) and data.get("status") in ("failed", "interrupted", "partial") else 0
+        return 0 if success else 1
     except KeyboardInterrupt:
         print(json.dumps({"schema_version": 1, "ok": False, "error": {"code": "interrupted", "message": "Interrupted."}}))
         return 130
@@ -420,8 +569,12 @@ def main(argv=None):
         from lab.research import redact
         print(json.dumps({"schema_version": 1, "ok": False, "error":
               {"code": "invalid_input" if code == 2 else "retryable" if code == 3 else "execution_failed",
-               "message": redact(str(error))}}))
+               "message": redact(str(error)),
+               **{key:getattr(error,key) for key in ("run_id","run_url") if hasattr(error,key)}}}))
         return code
+    finally:
+        if previous_term is not None:
+            signal.signal(signal.SIGTERM,previous_term)
 
 
 if __name__ == "__main__":

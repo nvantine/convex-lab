@@ -7,14 +7,32 @@
 {% if run.status == 'running' and not public %}<p class="notice" data-run-status="{% url 'run_status' run.pk %}">This foreground CLI process is running. This page updates automatically when it finishes.</p>{% endif %}
 {% if run.error and not public %}<p class="notice" role="alert">{{ run.error }}</p>{% endif %}
 <p>Evidence: {{ run.result.provenance|default:'Execution record' }}{% if run.window %} · {{ run.window }}{% endif %}</p>
+{% for warning in run.result.portfolio.warnings %}<p class="notice">{{ warning }}</p>{% endfor %}
 {% if run.holdout_claim %}<p class="notice">This run opened the final holdout. It remains recorded even if execution failed.</p>{% endif %}
 {% if not public %}
 <p><a href="{% url 'research_index' %}">Return to research ledger</a></p>
+<p><a href="{% url 'compare' %}?run={{ run.pk }}">Compare this run</a></p>
+{% if user.is_staff and run.status != 'running' and run.status != 'failed' and run.status != 'interrupted' %}
+<form method="post" action="{% url 'publication' run.pk %}">{% csrf_token %}
+{% if run.published %}<button name="action" value="unpublish">Unpublish report</button><a href="{% url 'gallery_run' run.pk %}">View shared report</a>
+{% else %}<button name="action" value="publish">Publish report to guest gallery</button>{% endif %}
+</form>
+<p><small>Publishing shares the report text, metrics, equations, charts, and tables. Review those before sharing; source files, logs, and artifacts stay private.</small></p>
+{% endif %}
 {% if run.revision %}<p><a href="{% url 'strategy_revision' run.revision.pk %}">Source revision: {{ run.revision.name }}</a></p>{% endif %}
 {% if run.experiment %}<p><a href="{% url 'result' run.experiment.pk %}">Inspect saved problem, math, and solver evidence</a></p>{% endif %}
 {% if run.evaluation %}<p><a href="{% url 'evaluation' run.evaluation.pk %}">Inspect historical evaluation and trades</a></p>{% endif %}
 {% endif %}
 {% if run.result.text %}<section><h2>Findings</h2><p class="report-text">{{ run.result.text }}</p></section>{% endif %}
+{% if run.kind == 'sweep' %}<section><h2>Validation ranking</h2>
+<dl class="metrics">
+<dt>Criterion</dt><dd>{{ run.result.summary.metric }} · {{ run.result.summary.direction }} · {{ run.result.summary.unit }}</dd>
+<dt>Observed range</dt><dd>{{ run.result.summary.minimum|number_display }} to {{ run.result.summary.maximum|number_display }}</dd>
+<dt>Median</dt><dd>{{ run.result.summary.median|number_display }}</dd>
+<dt>Planned / attempted</dt><dd>{{ run.result.summary.planned }} / {{ run.result.summary.attempted }}</dd>
+<dt>Excluded or failed</dt><dd>{{ run.result.summary.failed_or_excluded }}</dd>
+{% if run.result.summary.best_run_id %}<dt>Best observed trial</dt><dd>{% if public %}<code>{{ run.result.summary.best_run_id }}</code>{% else %}<a href="{% url 'research_run' run.result.summary.best_run_id %}">Inspect best trial and its settings</a>{% endif %}</dd>{% endif %}
+</dl></section>{% endif %}
 {% if metrics %}<section><h2>Metrics</h2><div class="table-scroll"><table>
 <thead><tr><th>Metric</th><th>Value</th><th>Unit</th></tr></thead>
 <tbody>{% for name, metric in metrics.items %}<tr><td>{{ name }}</td><td>{{ metric.value|number_display }}</td><td>{{ metric.unit }}</td></tr>{% endfor %}</tbody>
@@ -22,15 +40,24 @@
 {% if run.result.equations %}<section><h2>Author-supplied equations</h2>
 <p>These describe the Python model; they are not an automatic convexity certificate.</p>
 {% for equation in run.result.equations %}<div class="math" data-math>{{ equation }}</div>{% endfor %}</section>{% endif %}
-{% for chart in charts %}<section>{% include 'lab/_chart.html' with key=chart.key figure=chart.figure %}</section>{% endfor %}
-{% for table in tables %}<section><h2>{{ table.title|default:'Results table' }}</h2><div class="table-scroll"><table>
+{% for chart in charts %}<section>{% include 'lab/_chart.html' with chart=chart %}</section>{% endfor %}
+{% for table in tables %}<section><h2>{{ table.title|default:'Results table' }}</h2>
+<p class="table-hint"><small>Scroll horizontally to see every column.</small></p><div class="table-scroll"><table>
 <thead><tr>{% for column in table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
-<tbody>{% for row in table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+<tbody>{% for row in table.rows %}<tr>{% for cell in row %}<td class="report-cell">{{ cell|report_cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
 </table></div></section>{% endfor %}
 {% if run.result.portfolio.trades %}<section><h2>Simulated trades</h2><div class="table-scroll"><table>
 <thead><tr><th>Signal</th><th>Trade close</th><th>Turnover</th><th>Cost</th><th>Target weights</th></tr></thead>
 <tbody>{% for trade in run.result.portfolio.trades %}<tr><td>{{ trade.signal_date }}</td><td>{{ trade.date }}</td><td>{{ trade.turnover|number_display }}</td><td>{{ trade.cost|number_display }}</td><td>{{ trade.weights|json_display }}</td></tr>{% endfor %}</tbody>
 </table></div></section>{% endif %}
+{% if run.result.portfolio.refits and not public %}
+<section><h2>Rebalance diagnostics</h2>
+<p>These are saved Python diagnostics, not independently verified convexity certificates.</p>
+{% for refit in run.result.portfolio.refits %}{% if refit.diagnostics %}
+<details><summary>{{ refit.signal_date }} signal → {{ refit.trade_date }} trade</summary>
+<dl>{% for name, value in refit.diagnostics.items %}<dt><strong>{{ name }}</strong></dt><dd><pre>{{ value|json_display }}</pre></dd>{% endfor %}</dl>
+</details>
+{% endif %}{% endfor %}</section>{% endif %}
 {% if not public %}
 {% if children %}<section><h2>Trials</h2><ul>{% for child in children %}<li><a href="{% url 'research_run' child.pk %}">{{ child.name }}</a> · {{ child.status }}</li>{% endfor %}</ul></section>{% endif %}
 <section><h2>Notes</h2>{% for note in run.notes %}<p><strong>{{ note.kind }}</strong>: {{ note.text }}</p>{% empty %}<p>No annotations yet.</p>{% endfor %}</section>

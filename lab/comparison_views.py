@@ -8,25 +8,34 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from core.comparison import comparison_rows, experiment_metadata, evaluation_metadata
-from lab.models import Experiment, Evaluation
-from lab.workspaces import scoped
+from lab.models import Experiment, Evaluation, ResearchRun
+from lab.workspaces import scoped, request_scope
 
 
 @login_required
 def compare(request):
-    selections = [("experiment", Experiment), ("evaluation", Evaluation)]
-    if sum(len(request.GET.getlist(name)) for name, model in selections) > 6:
-        return HttpResponse(
-            "Choose at most six frozen records for a readable comparison.", status=400
-        )
+    selection = {name: request.GET.getlist(name) for name in ("experiment", "evaluation", "run")}
+    try:
+        context = comparison_context(request_scope(request), selection)
+    except ValueError as error:
+        return HttpResponse(str(error), status=400)
+    return render(request, "lab/compare.html", context)
+
+
+def comparison_context(scope, selection):
+    """The same frozen comparison for website forms, CLI JSON, and saved reports."""
+    selections = [("experiment", Experiment), ("evaluation", Evaluation), ("run", ResearchRun)]
+    if sum(len(selection.get(name, [])) for name, model in selections) > 6:
+        raise ValueError("Choose at most six frozen records for a readable comparison.")
     records = []
     experiments = []
     evaluations = []
+    runs = []
     try:
         for name, model in selections:
-            for value in dict.fromkeys(request.GET.getlist(name)):
+            for value in dict.fromkeys(selection.get(name, [])):
                 pk = UUID(value)
-                item = get_object_or_404(scoped(model, request), pk=pk)
+                item = get_object_or_404(scope.query(model), pk=pk)
                 if name == "experiment":
                     metadata = experiment_metadata(
                         item.spec,
@@ -46,7 +55,7 @@ def compare(request):
                     }
                     experiments.append(item)
                     link = "result"
-                else:
+                elif name == "evaluation":
                     metadata = evaluation_metadata(
                         item.dataset.prices,
                         item.dataset_digest,
@@ -72,15 +81,49 @@ def compare(request):
                     )
                     metrics = {
                         "Status": item.result["portfolio"]["status"],
-                        **item.result["portfolio"]["metrics"],
+                        **{metric_label(k, portfolio_units(k)):v for k,v in item.result["portfolio"]["metrics"].items()},
                     }
                     evaluations.append(item)
                     link = "evaluation"
+                else:
+                    metadata = {
+                        "Data fingerprint":item.dataset_digest or None,
+                        "Asset order":item.dataset.prices["symbols"] if item.dataset_id else None,
+                        "Window":item.window, "Source revision":item.revision.digest if item.revision_id else None,
+                        "Parameters":item.config.get("params",{}), "Seed":item.config.get("seed"),
+                        "Runtime":research_environment(item.runtime), "Evidence":item.result.get("provenance"),
+                        "Metric units":{k:v["unit"] for k,v in item.result.get("metrics",{}).items()},
+                    }
+                    if item.result.get("portfolio") and item.dataset_id:
+                        metadata.update(evaluation_metadata(item.dataset.prices,item.dataset_digest,item.window,
+                            item.config.get("variable","Python weights"),item.result))
+                        metadata["Seed"]=item.config.get("seed")
+                        metadata["Runtime"]=research_environment(item.runtime)
+                    if item.experiment_id:
+                        source_result=item.experiment.result
+                        if item.experiment.parent_id:
+                            source_result={**source_result,"settings":item.experiment.parent.result.get("settings",{})}
+                        source_metadata=experiment_metadata(item.experiment.spec,source_result)
+                        if item.result.get("portfolio"):
+                            metadata.update({"Saved problem · "+k:v for k,v in source_metadata.items()})
+                        else:
+                            metadata.update(source_metadata)
+                    elif item.config.get("spec"):
+                        metadata.update(experiment_metadata(item.config["spec"],{}))
+                    if item.kind=="sweep":
+                        metadata.update({"Campaign grid":item.config.get("grid"),
+                            "Campaign seeds":item.config.get("seeds"), "Ranking metric":item.result.get("summary",{}).get("metric")})
+                    if item.kind=="report":
+                        metadata["Selected records"]=item.config.get("selection")
+                    metrics = {"Status":item.status,
+                        **{metric_label(k,v["unit"]):v["value"] for k,v in item.result.get("metrics",{}).items()}}
+                    runs.append(item)
+                    link = "research_run"
                 records.append(
                     {
                         "name": item.name
                         if name == "experiment"
-                        else item.experiment.name + " · " + item.get_window_display(),
+                        else item.experiment.name + " · " + item.get_window_display() if name == "evaluation" else item.name,
                         "pk": item.pk,
                         "link": link,
                         "metadata": metadata,
@@ -95,7 +138,7 @@ def compare(request):
                     }
                 )
     except ValueError:
-        return HttpResponse("Select valid saved record IDs.", status=400)
+        raise ValueError("Select valid saved record IDs.")
     rows = comparison_rows(records)
     metric_names = list(dict.fromkeys(k for r in records for k in r["metrics"]))
     metric_rows = [
@@ -103,7 +146,9 @@ def compare(request):
         for name in metric_names
     ]
     charts = []
-    if evaluations:
+    histories = [(item.pk,item.experiment.name,item.result["portfolio"]) for item in evaluations]
+    histories += [(item.pk,item.name,item.result["portfolio"]) for item in runs if item.result.get("portfolio")]
+    if histories:
         figure = make_subplots(
             rows=2,
             cols=1,
@@ -111,9 +156,8 @@ def compare(request):
             vertical_spacing=0.1,
             subplot_titles=("Equity · initial capital = 1", "Drawdown"),
         )
-        for i, item in enumerate(evaluations):
-            series = item.result["portfolio"]
-            label = f"{i + 1}. {item.experiment.name[:24]} · {series['settings'].get('mode', 'fixed')}/{series['settings'].get('frequency', 'hold')}"
+        for i, (pk, name, series) in enumerate(histories):
+            label = f"{i + 1}. {name[:24]} · {series['settings'].get('mode', 'fixed')}/{series['settings'].get('frequency', 'hold')}"
             for row, key in [(1, "wealth"), (2, "drawdown")]:
                 figure.add_trace(
                     go.Scatter(
@@ -180,12 +224,19 @@ def compare(request):
                 charts.append(
                     {"key": "compare-" + name, "figure": figure.to_plotly_json()}
                 )
-    return render(
-        request,
-        "lab/compare.html",
-        {
-            "experiments": scoped(Experiment, request).only("id", "name", "created_at"),
-            "evaluations": scoped(Evaluation, request)
+    from copy import deepcopy
+    for run in runs:
+        if run.result.get("portfolio"): continue
+        for index, item in enumerate(run.result.get("charts", [])):
+            figure = deepcopy(item["figure"])
+            layout = figure.setdefault("layout",{})
+            original = layout.get("title",{})
+            title = original.get("text","") if isinstance(original,dict) else original
+            layout["title"] = {"text":f"{run.name} · {title}"}
+            charts.append({"key":f"compare-run-{run.pk}-{index}","figure":figure})
+    return {
+            "experiments": scope.query(Experiment).only("id", "name", "created_at"),
+            "evaluations": scope.query(Evaluation)
             .select_related("experiment", "dataset")
             .defer(
                 "result",
@@ -196,10 +247,25 @@ def compare(request):
             ),
             "selected_experiments": {e.pk for e in experiments},
             "selected_evaluations": {e.pk for e in evaluations},
+            "runs":scope.query(ResearchRun).only("id","name","kind","status","created_at"),
+            "selected_runs":{r.pk for r in runs},
             "records": records,
             "rows": rows,
             "metrics": metric_rows,
             "charts": charts,
             "differences": [r["name"] for r in rows if r["different"]],
-        },
-    )
+        }
+
+
+def metric_label(name, unit):
+    return f"{name} [{unit}]"
+
+
+def portfolio_units(name):
+    return {"total_return":"fraction","cagr":"annual fraction","volatility":"annual fraction",
+            "sharpe":"ratio","max_drawdown":"fraction","turnover":"multiple"}.get(name,"number")
+
+
+def research_environment(runtime):
+    return {k:v for k,v in runtime.items() if k not in
+            ("pid","child_pid","process_started","child_started","host")}

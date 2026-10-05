@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Convex Lab ResearchResult v1",
+  "type": "object",
+  "properties": {
+    "metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["value", "unit"],
+        "properties": {
+          "value": {"type": ["number", "null"]},
+          "unit": {"type": "string"},
+          "direction": {"enum": ["minimize", "maximize", "none"]}
+        }
+      }
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["columns", "rows"],
+        "properties": {
+          "title": {"type": "string"},
+          "columns": {"type": "array", "items": {"type": "string"}},
+          "rows": {"type": "array", "items": {"type": "array"}}
+        }
+      }
+    },
+    "charts": {
+      "type": "array",
+      "items": {"type": "object", "required": ["figure"], "properties": {"figure": {"type": "object"}}}
+    },
+    "text": {"type": "string"},
+    "equations": {"type": "array", "items": {"type": "string"}},
+    "artifacts": {"type": "array", "items": {"type": "string"}}
+  }
+}

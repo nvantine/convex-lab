@@ -4,10 +4,12 @@ import hashlib
 import plotly.graph_objects as go
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import FileResponse, Http404, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.http import FileResponse, Http404, JsonResponse, HttpResponse
+from django.shortcuts import get_object_or_404, render, redirect
+from django.views.decorators.http import require_POST
 from lab.models import ResearchRun, StrategyRevision
 from lab.workspaces import scoped
+from core.research import file_checksum
 
 
 @login_required
@@ -58,7 +60,33 @@ def artifact(request, pk, index):
     root = settings.LAB_ARTIFACT_ROOT / str(run.pk)
     path = (root / item["path"]).resolve()
     if not path.is_relative_to(root.resolve()) or not path.is_file(): raise Http404()
-    if hashlib.sha256(path.read_bytes()).hexdigest() != item["sha256"]:
+    if file_checksum(path) != item["sha256"]:
         return JsonResponse({"error":"Artifact differs from its saved checksum."}, status=409)
     # Always download: do not execute or embed user-produced HTML/model files.
     return FileResponse(path.open("rb"), as_attachment=True, filename=path.name)
+
+
+@login_required
+def gallery(request):
+    return render(request,"lab/gallery.html",{"runs":ResearchRun.objects.filter(published=True,status__in=["complete","partial"])})
+
+
+@login_required
+def gallery_run(request, pk):
+    run = get_object_or_404(ResearchRun,pk=pk,published=True,status__in=["complete","partial"])
+    # Only selected report output, not source, logs, artifacts, or owner links.
+    return render(request,"lab/research_run.html",{"run":run,"charts":report_charts(run),
+        "metrics":run.result.get("metrics",{}),"tables":run.result.get("tables",[]),"public":True})
+
+
+@login_required
+@require_POST
+def publication(request, pk):
+    run = get_object_or_404(scoped(ResearchRun,request),pk=pk)
+    if not request.user.is_staff: return HttpResponse("Publication belongs to the owner.",status=403)
+    if run.status not in ("complete","partial"): return HttpResponse("Publish a completed or partial report.",status=400)
+    if request.POST.get("action") not in ("publish","unpublish"):
+        return HttpResponse("Choose publish or unpublish.",status=400)
+    run.published = request.POST.get("action")=="publish"
+    run.save(update_fields=["published"])
+    return redirect("research_run",pk=run.pk)

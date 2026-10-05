@@ -1,7 +1,7 @@
 """Persist source revisions and foreground run evidence for web and CLI."""
 from contextlib import contextmanager
 from datetime import datetime
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import distributions
 from pathlib import Path
 import hashlib
 import json
@@ -17,18 +17,22 @@ from django.db import IntegrityError, OperationalError, transaction
 from django.utils import timezone
 from core.data import content_digest, split_windows
 from core.parser import ProblemError
-from core.research import clean_json
+from core.research import clean_json, file_checksum
 from lab.models import ResearchRun, StrategyRevision, Evaluation
 
 TERMINAL = {"complete", "partial", "failed", "interrupted"}
 
 
 def runtime_versions():
-    packages = {}
-    for name in ("django", "cvxpy", "numpy", "pandas", "plotly", "scikit-learn", "alpaca-py", "yfinance", "pytest"):
-        try: packages[name] = version(name)
-        except PackageNotFoundError: packages[name] = None
-    return {"python":platform.python_version(), "packages":packages}
+    packages = {d.metadata["Name"]:d.version for d in distributions() if d.metadata["Name"]}
+    files = sorted((settings.BASE_DIR/"core").glob("*.py"))
+    files += [settings.BASE_DIR/"lab"/name for name in ("cli.py","services.py","research.py","workflows.py")]
+    digest = content_digest({str(p.relative_to(settings.BASE_DIR)):p.read_text() for p in files if p.exists()})
+    try:
+        commit = subprocess.run(["git","rev-parse","HEAD"],cwd=settings.BASE_DIR,capture_output=True,text=True,timeout=2).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired): commit = None
+    return {"python":platform.python_version(), "packages":packages, "app_code_digest":digest,
+            "app_commit":commit, "platform":platform.platform()}
 
 
 def register(scope, path, entry_point, interface, name, description=""):
@@ -55,13 +59,15 @@ def register(scope, path, entry_point, interface, name, description=""):
         if file.stat().st_size > 10_000_000:
             raise ProblemError("Source file exceeds 10 MB; store generated data as run artifacts.")
         sources[relative.as_posix()] = file.read_text()
+    if any(redact(text) != text for text in sources.values()):
+        raise ProblemError("Source contains a loaded secret. Load credentials from the environment rather than embedding them in code.")
     if filename not in sources:
         raise ProblemError("Entry point file is absent from the source bundle. Register its containing directory for helper modules.")
     if interface not in ("portfolio", "research"): raise ProblemError("Choose portfolio or research.")
     if not name or len(name) > 120: raise ProblemError("Strategy name must contain 1–120 characters.")
     digest = content_digest({"sources":sources, "entry_point":entry_point, "interface":interface})
     return StrategyRevision.objects.create(owner=scope.owner, workspace=scope.workspace, name=name,
-        description=description, interface=interface, entry_point=entry_point, sources=sources, digest=digest)
+        description=redact(description), interface=interface, entry_point=entry_point, sources=sources, digest=digest)
 
 
 def retry_write(callback):
@@ -75,7 +81,9 @@ def retry_write(callback):
 
 def begin(scope, name, kind, config, dataset=None, window="", revision=None, parent=None,
           idempotency_key=None, claim_holdout=False):
-    config = clean_json(config)
+    if idempotency_key is not None and not 1 <= len(idempotency_key) <= 200:
+        raise ProblemError("Idempotency keys must contain 1–200 characters.")
+    config = redact_payload(clean_json(config))
     if idempotency_key:
         existing = scope.query(ResearchRun).filter(idempotency_key=idempotency_key).first()
         if existing:
@@ -107,10 +115,10 @@ def begin(scope, name, kind, config, dataset=None, window="", revision=None, par
 
 def finish(run, result=None, status="complete", error="", **links):
     if run.status != "running": return run
-    run.result = clean_json(result or {})
+    run.result = redact_payload(clean_json(result or {}))
     run.status, run.error, run.finished_at = status, redact(error), timezone.now()
     for name, value in links.items(): setattr(run, name, value)
-    retry_write(run.save)
+    retry_write(lambda: run.save(update_fields=["result","status","error","finished_at","artifacts",*links]))
     return run
 
 
@@ -126,14 +134,27 @@ def evidence(run):
         raise
 
 
-def redact(text):
+def secret_values():
     from core.providers import credentials
     values = [v for k, v in os.environ.items() if any(s in k.upper() for s in ("SECRET", "PASSWORD", "TOKEN", "API_KEY")) and len(v) >= 6]
     try: values.extend(credentials())
     except ProblemError: pass
-    for value in sorted(set(values), key=len, reverse=True):
+    return sorted(set(values), key=len, reverse=True)
+
+
+def redact(text, values=None):
+    for value in secret_values() if values is None else values:
         if value: text = text.replace(value, "[REDACTED]")
     return text
+
+
+def redact_payload(value, values=None):
+    """Redact strings without altering numeric data or corrupting JSON syntax."""
+    values = secret_values() if values is None else values
+    if isinstance(value,str): return redact(value,values)
+    if isinstance(value,list): return [redact_payload(item,values) for item in value]
+    if isinstance(value,dict): return {redact(str(k),values):redact_payload(v,values) for k,v in value.items()}
+    return value
 
 
 def folder_for(run):
@@ -162,7 +183,7 @@ def collect_artifacts(run, folder):
             try: path.write_text(redact(path.read_text()))
             except UnicodeError: pass
         artifacts.append({"path":relative.as_posix(), "size":path.stat().st_size,
-                          "sha256":hashlib.sha256(path.read_bytes()).hexdigest()})
+                          "sha256":file_checksum(path)})
     run.artifacts = artifacts
 
 
@@ -172,7 +193,7 @@ def process(run, command, folder, timeout, cwd=None, env=None):
     with (folder / "stdout.log").open("w") as out, (folder / "stderr.log").open("w") as err:
         child = subprocess.Popen(command, cwd=cwd, env=env, stdout=out, stderr=err, start_new_session=True)
         run.runtime.update({"host":socket.gethostname(), "pid":os.getpid(), "child_pid":child.pid,
-                            "process_started":process_identity(os.getpid())})
+                            "process_started":process_identity(os.getpid()), "child_started":process_identity(child.pid)})
         run.save(update_fields=["runtime"])
         try:
             return child.wait(timeout=timeout)
@@ -200,6 +221,16 @@ def recover(run):
         raise ProblemError("Recovery needs a run process recorded on this host.")
     if process_identity(runtime["pid"]) == runtime.get("process_started") and runtime.get("process_started") is not None:
         raise ProblemError("The recorded process is still running.")
+    child = runtime.get("child_pid")
+    if child and runtime.get("child_started") and process_identity(child) == runtime["child_started"]:
+        try: os.killpg(child,signal.SIGTERM)
+        except ProcessLookupError: pass
+        deadline=time.monotonic()+2
+        while process_identity(child)==runtime["child_started"] and time.monotonic()<deadline:
+            time.sleep(.05)
+        if process_identity(child)==runtime["child_started"]:
+            try: os.killpg(child,signal.SIGKILL)
+            except ProcessLookupError: pass
     return finish(run, status="interrupted", error="The recorded CLI process ended before saving its result.")
 
 
@@ -215,22 +246,27 @@ def run_python(run, params, options, seed, timeout):
         payload = {**payload, "dates":payload["dates"][:end], "values":payload["values"][:end]}
     request = {"bundle":str(bundle), "entry_point":run.revision.entry_point, "interface":run.revision.interface,
                "artifacts":str(output), "prices":payload, "train_end":train_end, "params":params,
-               "options":options, "seed":seed, "window":run.window or "validation", "windows":windows}
+               "options":options, "seed":seed, "window":run.window or "validation", "windows":windows,
+               "maximum_refits":run.config.get("max_refits",10000)}
     input_path, output_path = folder / "input.json", folder / "output.json"
     input_path.write_text(json.dumps(request, allow_nan=False))
     with evidence(run):
-            code = process(run, [sys.executable, "-m", "core.research_worker", str(input_path), str(output_path)],
-                           folder, timeout)
-            if not output_path.exists():
-                raise ProblemError(f"Python process exited with code {code} without a result. Inspect logs.")
-            response = json.loads(output_path.read_text())
-            if code or not response["ok"]: raise ProblemError(response.get("error", f"Process exited with code {code}."))
-            result = response["result"]
-            # Capture all produced files, including model artifacts, not just a
-            # self-reported path list. Web views serve only the frozen manifest.
-            collect_artifacts(run, folder)
-            status = "partial" if result.get("portfolio", {}).get("status", "complete") != "complete" else "complete"
-            finish(run, result, status)
+        code = process(run, [sys.executable, "-m", "core.research_worker", str(input_path), str(output_path)],
+                       folder, timeout)
+        if not output_path.exists():
+            raise ProblemError(f"Python process exited with code {code} without a result. Inspect logs.")
+        response = json.loads(output_path.read_text())
+        if code or not response["ok"]: raise ProblemError(response.get("error", f"Process exited with code {code}."))
+        result = response["result"]
+        for name in result.get("artifacts", []):
+            path = (output / name).resolve()
+            if not path.is_relative_to(output.resolve()) or not path.is_file():
+                raise ProblemError("A declared artifact is missing or outside the artifact directory.")
+        # Capture all produced files, including model artifacts, not just a
+        # self-reported path list. Web views serve only the frozen manifest.
+        collect_artifacts(run, folder)
+        status = "partial" if result.get("portfolio", {}).get("status", "complete") != "complete" else "complete"
+        finish(run, result, status)
     return run
 
 
@@ -241,24 +277,24 @@ def run_tests(run, timeout, pytest_args):
     env = {**os.environ, "LAB_DATABASE_PATH":str(folder / "tests.sqlite3"),
            "LAB_TEST_DATABASE_PATH":str(folder / "tests-test.sqlite3")}
     with evidence(run):
-            code = process(run, [sys.executable, "-m", "pytest", str(bundle), "--rootdir", str(bundle),
-                "-o", "testpaths=", "--junit-xml", str(report), *pytest_args], folder, timeout, cwd=bundle, env=env)
-            counts = {"tests":0, "failures":0, "errors":0, "skipped":0}
-            cases = []
-            if report.exists():
-                root = ET.parse(report).getroot()
-                for suite in root.iter("testsuite"):
-                    for key in counts: counts[key] += int(suite.get(key, "0"))
-                for case in root.iter("testcase"):
-                    failed = case.find("failure"); error = case.find("error"); skipped = case.find("skipped")
-                    failure = failed if failed is not None else error
-                    cases.append({"name":case.get("name"), "status":"failed" if failure is not None else "skipped" if skipped is not None else "passed",
-                                  "message":redact(failure.get("message", "") if failure is not None else "")})
-            result = {"schema_version":1, "provenance":"pytest", "exit_code":code, "counts":counts,
-                      "metrics":{key:{"value":value, "unit":"count", "direction":"none"} for key,value in counts.items()},
-                      "tables":[{"title":"Test cases", "columns":["Name","Status","Message"],
-                                 "rows":[[c["name"],c["status"],c["message"]] for c in cases]}],
-                      "charts":[], "equations":[], "text":"Pytest evidence for this exact source revision."}
-            collect_artifacts(run, folder)
-            finish(run, result, "complete" if code == 0 else "failed", error="" if code == 0 else f"pytest exited with code {code}")
+        code = process(run, [sys.executable, "-m", "pytest", str(bundle), "--rootdir", str(bundle),
+            "-o", "testpaths=", "--junit-xml", str(report), *pytest_args], folder, timeout, cwd=bundle, env=env)
+        counts = {"tests":0, "failures":0, "errors":0, "skipped":0}
+        cases = []
+        if report.exists():
+            root = ET.parse(report).getroot()
+            for suite in root.iter("testsuite"):
+                for key in counts: counts[key] += int(suite.get(key, "0"))
+            for case in root.iter("testcase"):
+                failed = case.find("failure"); error = case.find("error"); skipped = case.find("skipped")
+                failure = failed if failed is not None else error
+                cases.append({"name":case.get("name"), "status":"failed" if failure is not None else "skipped" if skipped is not None else "passed",
+                              "message":redact(failure.get("message", "") if failure is not None else "")})
+        result = {"schema_version":1, "provenance":"pytest", "exit_code":code, "counts":counts,
+                  "metrics":{key:{"value":value, "unit":"count", "direction":"none"} for key,value in counts.items()},
+                  "tables":[{"title":"Test cases", "columns":["Name","Status","Message"],
+                             "rows":[[c["name"],c["status"],c["message"]] for c in cases]}],
+                  "charts":[], "equations":[], "text":"Pytest evidence for this exact source revision."}
+        collect_artifacts(run, folder)
+        finish(run, result, "complete" if code == 0 else "failed", error="" if code == 0 else f"pytest exited with code {code}")
     return run
