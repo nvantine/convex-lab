@@ -15,7 +15,7 @@
 <div class="table-scroll"><table><thead><tr><th>Metric</th><th>Chosen portfolio</th><th>Equal weight</th></tr></thead><tbody>
 {% for row in metrics %}<tr><th>{{ row.name }}</th><td>{{ row.portfolio|number_display }}</td><td>{{ row.benchmark|number_display }}</td></tr>{% endfor %}
 </tbody></table></div>
-<p><small>Equal weight buys all dataset assets equally, with the same entry cost and statistic settings. It holds fixed units and also drifts.</small></p>
+<p><small>Equal weight buys all dataset assets equally, with the same entry cost and statistic settings. It uses the same rebalance schedule, restoring equal weights on each rebalance.</small></p>
 {% for chart in charts %}<button type="button" class="expand-chart" data-target="evaluation-{{ chart.key }}">Expand chart</button><div id="evaluation-{{ chart.key }}" class="chart" data-chart="figure-{{ chart.key }}"></div>{% with script_id='figure-'|add:chart.key %}{{ chart.figure|json_script:script_id }}{% endwith %}{% endfor %}
 </section>
 <section><h2>Initial portfolio and realized modeled costs</h2>
@@ -23,11 +23,16 @@
 <dl class="metrics"><dt>Net exposure</dt><dd>{{ evaluation.result.portfolio.net_exposure|number_display }}</dd>
 <dt>Gross exposure</dt><dd>{{ evaluation.result.portfolio.gross_exposure|number_display }}</dd>
 <dt>Initial cash fraction</dt><dd>{{ evaluation.result.portfolio.initial_cash_fraction|number_display }}</dd>
+<dt>Total trading cost</dt><dd>{{ evaluation.result.portfolio.trading_cost|number_display }}</dd>
 <dt>Entry cost</dt><dd>{{ evaluation.result.portfolio.entry_cost|number_display }}</dd>
 <dt>Short borrow cost</dt><dd>{{ evaluation.result.portfolio.borrow_cost|number_display }}</dd>
 <dt>Financing cost</dt><dd>{{ evaluation.result.portfolio.financing_cost|number_display }}</dd></dl>
 <p>Costs are in units of initial capital. Adjusted prices approximate total returns; these units are not actual raw shares. This model omits changing borrow availability, margin rules, market impact, and currency conversion.</p>
 </section>
+<section><h2>Simulated trades and rolling solves</h2>
+<p>Policy: {{ evaluation.result.portfolio.settings.mode|default:'fixed' }} · Schedule: {{ evaluation.result.portfolio.settings.frequency|default:'hold' }}. Transaction costs include every buy and sell; turnover is gross traded notional divided by pre-trade equity, summed across trades.</p>
+<div class="table-scroll"><table><thead><tr><th>Trade close</th><th>Signal close</th><th>Cost</th><th>Turnover</th><th>Weights / dollar trades</th></tr></thead><tbody>{% for trade in trades %}<tr><td>{{ trade.date }}</td><td>{{ trade.signal_date|default:'Original weights' }}</td><td>{{ trade.cost|number_display }}</td><td>{{ trade.turnover|number_display }}</td><td><details><summary>Show allocations and trades</summary><pre>{{ trade.weights|numeric_display }}</pre><pre>{{ trade.dollar_trades|numeric_display }}</pre></details></td></tr>{% empty %}<tr><td colspan="5">Legacy fixed-holdings result; no rebalance ledger was recorded.</td></tr>{% endfor %}</tbody></table></div>
+<ul>{% for index,refit in refits %}<li><a href="{% url 'rebalance' evaluation.pk index %}">Inspect rolling solve {{ index }} for {{ refit.trade_date }}</a> · {{ refit.result.status }} · Past returns through {{ refit.last_return }}</li>{% endfor %}</ul></section>
 <details><summary>Reproducibility details</summary><p class="digest">{{ evaluation.digest }}</p><p>Data fingerprint: {{ evaluation.dataset_digest }} · Decision variable: {{ evaluation.variable }}</p>
 <pre>{{ evaluation.result|json_display }}</pre></details>
 {% endblock %}

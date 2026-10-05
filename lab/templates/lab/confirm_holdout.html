@@ -6,10 +6,10 @@
 <p>You are opening unseen results for <strong>{{ dataset.name }}</strong>, {{ window.first }} through {{ window.last }} ({{ window.count }} observations), using <strong>{{ experiment.name }}</strong>.</p>
 <p class="notice">This action spends the final holdout for this data snapshot. You can revisit this frozen result, but cannot run a different final portfolio or change final assumptions on identical cached data. Use validation for further exploration.</p>
 <p>{{ notice }}</p>
-<h2>Exact allocations and assumptions</h2>
+<h2>Saved allocations and chosen policy</h2>
 <div class="table-scroll"><table><thead><tr><th>Asset</th><th>Weight</th></tr></thead><tbody>{% for symbol, value in weights %}<tr><th>{{ symbol }}</th><td>{{ value|number_display }}</td></tr>{% endfor %}</tbody></table></div>
-<p>Negative weights are shorts. The balance is cash (1 − the sum of weights). Entry is at the first holdout close; returns start after entry. This is an adjusted-price approximation, with no rebalances or final liquidation.</p>
-<pre>{{ options|json_display }}</pre>
+<p>{% if options.mode == "rolling" %}These are the saved problem’s allocations. Rolling evaluation recomputes allocations at entry and each selected rebalance using preceding-close data; the executed allocations are recorded in its trade ledger. {% endif %}Negative weights are shorts. The balance is cash (1 − the sum of weights). Entry is at the first holdout close; returns start after entry. This is an adjusted-price approximation, with your chosen rebalance policy and no final liquidation.</p>
+<pre>{{ options|json_display }}</pre><p>Rolling requests allow up to {{ refit_limit }} re-solves with a {{ evaluation_seconds }}-second cooperative budget. A failed or timed-out later solve saves an explicitly partial result and still spends this holdout.</p>
 <form method="post" action="{% url 'confirm_holdout' %}">{% csrf_token %}<input type="hidden" name="ticket" value="{{ ticket }}">
 <p><label for="confirm"><input type="checkbox" name="confirm" id="confirm" required> I have finished choosing this portfolio and understand that opening the final holdout spends it.</label></p>
 <button>Open final holdout &amp; save</button></form>

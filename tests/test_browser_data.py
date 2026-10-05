@@ -8,7 +8,7 @@ from test_data_views import fetcher
 from lab.models import Dataset, Evaluation
 
 pytestmark=[pytest.mark.browser,pytest.mark.django_db(transaction=True)]
-SHOTS=Path('screenshots/milestone-3')
+SHOTS=Path('.local/browser-regression-m3')
 
 
 def read_db(function):
@@ -74,10 +74,10 @@ def test_dataset_to_validation_and_confirmed_final(live_server,browser_user,fetc
         page.locator('.math-panel').screenshot(path=str(SHOTS/'15-mathematical-specification.png'))
         page.get_by_role('button',name='Solve & save experiment').click()
         expect(page.locator('#solver-status')).to_have_text('optimal')
-        page.get_by_role('link',name='Evaluate fixed holdings').click()
+        page.get_by_role('link',name='Evaluate historical portfolio').click()
         expect(page.get_by_text('Imported estimates and scenarios are unchanged',exact=False)).to_be_visible()
         expect(page.get_by_label('Frozen dataset')).to_have_value(read_db(lambda:str(Dataset.objects.get().pk)))
-        page.get_by_label('Entry trading cost').fill('15')
+        page.get_by_label('Trading cost').fill('15')
         shot(page,'04-evaluation-settings')
         page.get_by_role('button',name='Evaluate validation & save').click()
         expect(page.get_by_role('heading',name='Validation evaluation',exact=True)).to_be_visible()
@@ -128,7 +128,7 @@ def test_single_asset_yfinance_fetch_errors_and_signed_weights(live_server,brows
         page.goto(live_server.url+'/datasets/')
         fill_fetch(page,'top 100 market cap nasdaq tickers')
         page.get_by_role('button',name='Fetch & save dataset').click()
-        expect(page.get_by_text('Enter 1–20 actual ticker symbols',exact=False)).to_be_visible()
+        expect(page.get_by_text('Enter 1–100 actual ticker symbols',exact=False)).to_be_visible()
         assert read_db(lambda:Dataset.objects.count())==0
         shot(page,'11-invalid-tickers')
         fill_fetch(page,'SPY','yfinance')
@@ -138,7 +138,7 @@ def test_single_asset_yfinance_fetch_errors_and_signed_weights(live_server,brows
         page.get_by_role('button',name='Create editable problem').click()
         page.get_by_role('button',name='Solve & save experiment').click()
         expect(page.locator('#solver-status')).to_have_text('optimal')
-        page.get_by_role('link',name='Evaluate fixed holdings').click()
+        page.get_by_role('link',name='Evaluate historical portfolio').click()
         page.get_by_role('button',name='Evaluate validation & save').click()
         expect(page.get_by_role('heading',name='Validation evaluation',exact=True)).to_be_visible()
         shot(page,'12-single-asset-evaluation')
@@ -153,7 +153,7 @@ def test_single_asset_yfinance_fetch_errors_and_signed_weights(live_server,brows
         page.get_by_role('button',name='Solve & save experiment').click()
         expect(page.locator('#solver-status')).to_have_text('optimal')
         assert_rendering(page)
-        page.get_by_role('link',name='Evaluate fixed holdings').click()
+        page.get_by_role('link',name='Evaluate historical portfolio').click()
         page.get_by_label('Annual short borrow rate').fill('.05')
         page.get_by_role('button',name='Evaluate validation & save').click()
         expect(page.locator('#evaluation-status')).to_have_text('complete')
@@ -168,8 +168,9 @@ def test_single_asset_yfinance_fetch_errors_and_signed_weights(live_server,brows
         fetcher.side_effect=ProblemError('Alpaca could not fetch daily prices. Check credentials/access or retry.')
         page.goto(live_server.url+'/datasets/')
         fill_fetch(page)
+        page.get_by_label('Reuse recent locally cached prices').uncheck()
         page.get_by_role('button',name='Fetch & save dataset').click()
-        expect(page.get_by_text('Alpaca could not fetch daily prices.',exact=False)).to_be_visible()
+        expect(page.get_by_text('Alpaca could not fetch daily prices.',exact=False).first).to_be_visible()
         shot(page,'14-provider-error')
         assert not errors,errors
         browser.close()

@@ -270,3 +270,37 @@ if (datasetForm) datasetForm.addEventListener('submit', () => {
   button.disabled = true;
   button.textContent = 'Fetching daily prices…';
 });
+
+// Browser-driven asynchronous batches: persisted progress, no worker process.
+const fetchControls = document.querySelector('#fetch-controls');
+if (fetchControls) {
+  let running = false, paused = false;
+  const resume = document.querySelector('#fetch-resume');
+  const status = document.querySelector('#fetch-status');
+  const run = async () => {
+    if (running) return;
+    running = true; paused = false; resume.disabled = true;
+    try {
+      while (!paused) {
+        status.textContent = `${document.querySelector('#fetch-meter').value} symbols saved. Fetching next batch…`;
+        const response = await fetch(fetchControls.dataset.batchUrl, {method: 'POST',
+          headers: {'X-CSRFToken': fetchControls.querySelector('[name=csrfmiddlewaretoken]').value}, credentials: 'same-origin'});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Fetch failed. Resume to retry.');
+        status.textContent = `${result.completed} / ${result.total} symbols stored. ${result.message}`;
+        document.querySelector('#fetch-meter').value = result.completed;
+        document.querySelector('#available-symbols').textContent = result.available.join(', ');
+        document.querySelector('#fetch-errors').replaceChildren();
+        for (const [symbol, error] of Object.entries(result.errors)) {
+          const li = document.createElement('li'); li.textContent = `${symbol}: ${error}`; document.querySelector('#fetch-errors').append(li);
+        }
+        if (result.dataset_url) { window.location.assign(result.dataset_url); break; }
+        if (!result.pending) break;
+      }
+    } catch (error) { status.textContent = `${error.message} Successful batches remain saved.`; }
+    finally { running = false; resume.disabled = false; }
+  };
+  resume.addEventListener('click', run);
+  document.querySelector('#fetch-pause').addEventListener('click', () => { paused = true; status.textContent += ' Pausing after the current batch.'; });
+  if (fetchControls.dataset.autoRun === 'true') run();
+}

@@ -5,9 +5,11 @@
 <p>Fetch and freeze adjusted daily prices for stocks or ETFs. Choose the provider explicitly; experiments reuse the saved snapshot.</p>
 <p>Alpaca uses the IEX feed, available on free data accounts, with splits and dividends adjusted. IEX covers one exchange and can differ from consolidated prices. yfinance is an alternative; provider errors never trigger a silent switch.</p>
 <form method="post" id="dataset-form">{% csrf_token %}{{ form.non_field_errors }}
+<input type="hidden" name="action" value="start">
 {% for field in form %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}<small>{{ field.help_text }}</small></p>{% endfor %}
-<p><small>Up to {{ asset_limit }} assets per request. Fetching runs in this request. The page opens the saved dataset when fetching finishes.</small></p>
+<p><small>Up to {{ asset_limit }} assets, fetched in batches of 1–5. Each successful symbol is saved locally. Pause or resume from the progress page; it opens the dataset once all assets are ready. Daily refresh requires the documented server timer. Guests can fetch data but cannot enable persistent daily refresh.</small></p>
 <button>Fetch &amp; save dataset</button></form>
+<section><h2>Fetch progress and daily watches</h2><ul>{% for record in fetch_requests %}<li><a href="{% url 'fetch_progress' record.pk %}">{{ record.name }}</a> · {{ record.series|length }}/{{ record.symbols|length }} symbols stored · {% if record.refresh_daily %}daily refresh enabled{% else %}manual refresh{% endif %}</li>{% empty %}<li>No fetch requests yet.</li>{% endfor %}</ul></section>
 <section><h2>Saved snapshots</h2><ul>{% for dataset in datasets %}
 <li><a href="{% url 'dataset' dataset.pk %}">{{ dataset.name }}</a> · {{ dataset.source }} · {{ dataset.created_at|date:'Y-m-d H:i' }} UTC</li>
 {% empty %}<li>No datasets yet. For a small first example, fetch SPY and AGG.</li>{% endfor %}</ul></section>

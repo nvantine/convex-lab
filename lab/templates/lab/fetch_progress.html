@@ -1,0 +1,19 @@
+{% extends 'lab/base.html' %}
+{% block title %}Fetching {{ record.name }}{% endblock %}
+{% block content %}
+<h1>Fetch progress</h1><p>{{ record.name }} · {{ record.source }} · {{ record.start }} through {{ record.end }}</p>
+<p>Each request fetches up to {{ record.batch_size }} symbols. Successful prices are saved locally. Closing this page pauses further batches; return here to resume. A running batch finishes saving its results.</p>
+<form id="fetch-controls" data-batch-url="{% url 'fetch_batch' record.pk %}" data-auto-run="{% if progress.pending and not record.dataset %}true{% else %}false{% endif %}">{% csrf_token %}
+<p id="fetch-status" role="status">{{ progress.completed }} / {{ progress.total }} symbols stored. {{ progress.message }}</p>
+<progress id="fetch-meter" value="{{ progress.completed }}" max="{{ progress.total }}"></progress>
+<div class="actions"><button type="button" id="fetch-resume">Resume fetching</button><button type="button" id="fetch-pause">Pause after this batch</button></div></form>
+<p id="fetch-finished">{% if record.dataset %}<a href="{% url 'dataset' record.dataset.pk %}">Open saved dataset</a>{% endif %}</p>
+<section><h2>Symbols needing attention</h2><ul id="fetch-errors">{% for symbol,error in record.errors.items %}<li>{{ symbol }}: {{ error }}</li>{% empty %}<li>No symbol errors recorded.</li>{% endfor %}</ul>
+<form method="post" action="{% url 'fetch_action' record.pk %}">{% csrf_token %}<button name="action" value="retry">Retry failed symbols one at a time</button></form></section>
+<details><summary>Use only successfully fetched assets</summary><p>Available now: <span id="available-symbols">{{ available|join:', ' }}</span>. This changes your requested universe. Missing assets are never silently discarded.</p>
+<form method="post" action="{% url 'fetch_action' record.pk %}">{% csrf_token %}<label><input type="checkbox" name="confirm" required> I approve excluding every asset that has not successfully fetched.</label><button name="action" value="available">Create dataset from available assets</button></form></details>
+<section><h2>Refresh this universe</h2><p>Refresh pulls adjusted history again to keep splits/dividends consistent, and creates a new frozen snapshot if data changed. Existing experiments keep their original prices.</p>
+<form method="post" action="{% url 'fetch_action' record.pk %}">{% csrf_token %}<button name="action" value="refresh">Refresh through the latest completed day</button></form>
+{% if user.is_staff %}<form method="post" action="{% url 'fetch_action' record.pk %}">{% csrf_token %}<p><label><input type="checkbox" name="enabled" {% if record.refresh_daily %}checked{% endif %}> Refresh daily using the server timer</label></p><button name="action" value="watch">Save daily refresh preference</button></form>{% endif %}</section>
+<p><a href="{% url 'datasets' %}">Return to datasets</a></p>
+{% endblock %}

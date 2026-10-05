@@ -108,3 +108,23 @@ def test_pinned_sdk_transport_still_has_expected_fields():
     # No network: construction validates the private transport compatibility.
     with providers.StockHistoricalDataClient('fake-key','fake-secret')._session as session:
         assert isinstance(session,providers.requests.Session)
+
+
+@pytest.mark.parametrize('instant,expected',[
+    ('2026-10-05T20:30:00+00:00','2026-10-02'),
+    ('2026-10-05T21:30:00+00:00','2026-10-05'),
+    ('2026-10-04T22:30:00+00:00','2026-10-02'),
+    ('2026-12-07T21:30:00+00:00','2026-12-04'),
+    ('2026-12-07T22:30:00+00:00','2026-12-07')])
+def test_completed_day_cutoff_accounts_for_weekends_and_dst(instant,expected):
+    assert providers.last_completed_day(datetime.fromisoformat(instant)).isoformat()==expected
+
+
+@pytest.mark.parametrize('code',[401,403,429])
+def test_alpaca_access_and_rate_limit_errors_are_specific_but_sanitized(monkeypatch,code):
+    monkeypatch.setattr(providers,'credentials',lambda:('fake','fake'))
+    error=RuntimeError('private-secret');error.status_code=code
+    monkeypatch.setattr(providers,'StockHistoricalDataClient',Mock(side_effect=error))
+    with pytest.raises(ProblemError,match=str(code)) as caught:
+        providers.fetch_prices('alpaca',['SPY'],date(2024,1,1),date(2024,2,1))
+    assert 'private-secret' not in str(caught.value)

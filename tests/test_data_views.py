@@ -69,7 +69,7 @@ def test_fetch_redirects_and_creates_one_or_two_assets(client,owner,fetcher,symb
 
 def test_actual_tickers_are_required_and_errors_are_visible(client,owner,fetcher):
     client.force_login(owner)
-    for value in ('top 100 market cap nasdaq tickers','',','.join(['SPY']+[f'A{i}' for i in range(20)])):
+    for value in ('top 100 market cap nasdaq tickers','',','.join(['SPY']+[f'A{i}' for i in range(100)])):
         response=fetch(client,value)
         assert response.status_code==200
         assert b'errorlist' in response.content

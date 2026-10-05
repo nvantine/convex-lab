@@ -1,14 +1,14 @@
 {% extends 'lab/base.html' %}
 {% block title %}Evaluate {{ experiment.name }}{% endblock %}
 {% block content %}
-<h1>Evaluate fixed holdings</h1>
+<h1>Evaluate historical portfolio</h1>
 <p><a href="{% url 'result' experiment.pk %}">{{ experiment.name }}</a></p>
 <p>{{ notice }}</p>
-<p>Choose a decision vector to interpret as weights in the dataset's displayed asset order. Negative entries are short exposures. There is one entry trade at the first evaluation close, then holdings drift without rebalancing or refitting.</p>
-<p>Costs apply to buys and sells at entry. Short borrowing and negative-cash financing accrue using calendar days / 365. Positive cash earns zero. Ending holdings are marked to market with no exit trade or exit fee.</p>
+<p>Negative weights are shorts. Choose rolling re-optimization to re-solve your exact edited problem at each rebalance, or restore its original weights. Monthly and weekly trades use the first available close in each new calendar period; daily trades use each subsequent close. Hold after entry preserves fixed units.</p>
+<p>Signals and estimates use prices through the preceding close; simulated trades occur at the following close. Map the parameters to update below; every other constant and constraint stays as defined. Costs apply to every buy and sell. Borrowing and negative-cash financing use calendar days / 365. Positive cash earns zero. No final liquidation.</p>
 {% if has_datasets %}
 <form method="post">{% csrf_token %}{{ form.non_field_errors }}
-{% for field in form %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}<small>{{ field.help_text }}</small></p>{% endfor %}
+{% for label,fields in form.grouped_fields %}<fieldset><legend>{{ label }}</legend>{% for field in fields %}<p>{{ field.label_tag }} {{ field }} {{ field.errors }}<small>{{ field.help_text }}</small></p>{% endfor %}</fieldset>{% endfor %}
 <div class="actions"><button name="action" value="validation">Evaluate validation &amp; save</button>
 <button name="action" value="review_holdout">Review final holdout…</button></div>
 </form>

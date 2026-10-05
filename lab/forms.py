@@ -63,6 +63,9 @@ class DatasetForm(forms.Form):
     symbols = forms.CharField(label='Ticker symbols', help_text='Stocks or ETFs, separated by commas or spaces. Use actual ticker symbols, not a description.')
     start = forms.DateField(widget=forms.DateInput(attrs={'type':'date'}), label='Start date (inclusive)')
     end = forms.DateField(widget=forms.DateInput(attrs={'type':'date'}), label='End date (inclusive, completed days)')
+    batch_size = forms.IntegerField(required=False,min_value=1,max_value=5,initial=5,label='Symbols per batch')
+    prefer_cache = forms.BooleanField(required=False,initial=True,label='Reuse recent locally cached prices')
+    refresh_daily = forms.BooleanField(required=False,initial=True,label='Refresh daily after market close (owner only; requires the refresh timer)')
 
     def clean_symbols(self):
         import re
@@ -73,13 +76,13 @@ class DatasetForm(forms.Form):
         return values
 
     def clean(self):
-        from datetime import date
+        from core.providers import last_completed_day
         data = super().clean()
         if data.get('start') and data.get('end'):
             if data['start'] >= data['end']:
                 self.add_error('end','End must be after start.')
-            if data['end'] >= date.today():
-                self.add_error('end','Choose a date before today so incomplete daily bars are excluded.')
+            if data['end'] > last_completed_day():
+                self.add_error('end','Choose a completed trading day. Today is available after 5pm New York time.')
         return data
 
 
@@ -92,15 +95,45 @@ class TrainingForm(forms.Form):
 class EvaluationForm(forms.Form):
     dataset = forms.ModelChoiceField(queryset=None, label='Frozen dataset')
     variable = forms.ChoiceField(label='Decision vector to treat as asset weights')
-    cost_bps = forms.FloatField(min_value=0,max_value=1000,initial=10,label='Entry trading cost (bps per buy or sell)')
+    cost_bps = forms.FloatField(min_value=0,max_value=1000,initial=10,label='Trading cost (bps per buy or sell)')
     borrow_rate = forms.FloatField(min_value=0,max_value=1,initial=.03,label='Annual short borrow rate (fraction)',help_text='0.03 means 3%; charged on prior-close short notional, calendar days / 365.')
     financing_rate = forms.FloatField(min_value=0,max_value=1,initial=0,label='Annual negative-cash financing rate (fraction)')
     risk_free_rate = forms.FloatField(min_value=0,max_value=1,initial=0,label='Annual risk-free rate for Sharpe (fraction)',help_text='Used in the statistic only. Positive cash earns zero in this model.')
+    mode = forms.ChoiceField(required=False,choices=[('rolling','Rolling re-optimization'),('fixed','Restore original weights')],initial='rolling',label='Rebalance policy')
+    frequency = forms.ChoiceField(required=False,choices=[('monthly','Monthly'),('weekly','Weekly'),('daily','Daily'),('hold','Hold after entry')],initial='monthly',label='Rebalance frequency')
+    lookback = forms.IntegerField(required=False,min_value=2,initial=126,label='Rolling lookback (past return observations)')
+    estimator = forms.ChoiceField(required=False,choices=[('ledoit-wolf','Ledoit–Wolf'),('sample','Sample covariance')],initial='ledoit-wolf',label='Rolling covariance estimator')
+    solver = forms.ChoiceField(required=False,choices=[(s,s) for s in SOLVERS],initial='CLARABEL',label='Rolling solver')
+    mean_parameter = forms.ChoiceField(required=False,label='Parameter replaced by mean returns')
+    covariance_parameter = forms.ChoiceField(required=False,label='Parameter replaced by covariance')
+    returns_parameter = forms.ChoiceField(required=False,label='Parameter replaced by scenario returns')
+    scenario_count_parameter = forms.ChoiceField(required=False,label='Parameter replaced by scenario count')
+    previous_weights_parameter = forms.ChoiceField(required=False,label='Parameter replaced by prior-close drifting weights')
+    scenario_variable = forms.ChoiceField(required=False,label='Auxiliary vector resized to scenario count (optional)')
 
-    def __init__(self, *args, datasets, variables, **kwargs):
+    def __init__(self, *args, datasets, variables, spec=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.field_groups=[('Portfolio and rebalance policy',['dataset','variable','mode','frequency']),
+            ('Costs and metric assumptions',['cost_bps','borrow_rate','financing_rate','risk_free_rate']),
+            ('Rolling inputs (used only for rolling re-optimization)', ['lookback','estimator','solver','mean_parameter',
+             'covariance_parameter','returns_parameter','scenario_count_parameter','previous_weights_parameter','scenario_variable'])]
         self.fields['dataset'].queryset = datasets
         self.fields['variable'].choices = [(v,v) for v in variables]
+        spec=spec or {'parameters':[],'variables':[]}
+        parameters=[p['name'] for p in spec['parameters']]
+        defaults={'mean_parameter':'mu','covariance_parameter':'Sigma','returns_parameter':'R',
+                  'scenario_count_parameter':'scenario_count','previous_weights_parameter':'w_prev','scenario_variable':'u'}
+        for field,default in defaults.items():
+            names=parameters if field!='scenario_variable' else [v['name'] for v in spec['variables']]
+            self.fields[field].choices=[('','Keep unchanged')]+[(name,name) for name in names]
+            if default in names: self.initial[field]=default
+
+    def grouped_fields(self):
+        return [(label,[self[name] for name in names]) for label,names in self.field_groups]
 
     def options(self):
-        return {key:self.cleaned_data[key] for key in ('cost_bps','borrow_rate','financing_rate','risk_free_rate')}
+        result={key:self.cleaned_data[key] for key in ('cost_bps','borrow_rate','financing_rate','risk_free_rate')}
+        result.update({key:self.cleaned_data[key] or '' for key in ('mean_parameter','covariance_parameter','returns_parameter','scenario_count_parameter','previous_weights_parameter','scenario_variable')})
+        result.update(mode=self.cleaned_data['mode'] or 'fixed',frequency=self.cleaned_data['frequency'] or 'hold',
+            lookback=self.cleaned_data['lookback'] or 126,estimator=self.cleaned_data['estimator'] or 'ledoit-wolf',solver=self.cleaned_data['solver'] or 'CLARABEL')
+        return result

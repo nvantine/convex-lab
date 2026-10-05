@@ -1,7 +1,8 @@
 # Convex Lab instructions
 
 Build a small, understandable learning app. Follow the user's approved plan;
-complete one milestone at a time and stop for review. Use uv for Python,
+complete milestones in small commits. The latest user request authorizes finishing
+all remaining approved milestones in this turn. Use uv for Python,
 environments, dependencies, and tests. Make small conventional commits and
 report git status/log, verification, screenshots, and limitations.
 
@@ -10,8 +11,10 @@ app. Interpret whitelisted AST nodes explicitly; never use eval/exec, run upload
 code, or hide strategy-specific constraints outside the editable specification.
 Math rendering and solver construction must share the parsed expressions.
 
-No trading/accounts/positions endpoints, background jobs, scheduler, CLI, or
-rolling backtest in v1. Preserve immutable experiments and per-session guest
+No trading/accounts/positions endpoints or general agent CLI. The latest user
+request adds resumable browser batch fetching, an optional scheduled Django data
+refresh command, and historical rolling re-optimization/rebalancing. Keep solves
+synchronous and avoid a general worker/queue. Preserve immutable experiments and per-session guest
 workspaces. Scope every record lookup and mutation by user AND workspace.
 Solves run outside database transactions using fresh CVXPY objects.
 

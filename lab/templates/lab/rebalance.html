@@ -1,0 +1,12 @@
+{% extends 'lab/base.html' %}
+{% load lab_tags %}
+{% block title %}Rolling solve · Convex Lab{% endblock %}
+{% block content %}
+<h1>Rolling solve for {{ record.trade_date }}</h1>
+<p><a href="{% url 'evaluation' evaluation.pk %}">Return to evaluation</a></p>
+<p>{{ record.lookback }} return observations, {{ record.first_return }} through {{ record.last_return }}. These were known before the trade close. Estimator: {{ record.estimator }}. Frozen status: {{ record.result.status }}.</p>
+{% include 'lab/_math.html' %}
+<h2>Decision variables and shadow prices</h2><pre>{{ record.result.variables|json_display }}</pre>
+<div class="table-scroll"><table><thead><tr><th>Constraint</th><th>Dual</th><th>Violation</th></tr></thead><tbody>{% for constraint in record.result.constraints %}<tr><td>{{ constraint.number }}<div class="math" data-math>{{ constraint.latex }}</div></td><td><pre>{{ constraint.dual|numeric_display }}</pre></td><td><pre>{{ constraint.violation|numeric_display }}</pre></td></tr>{% endfor %}</tbody></table></div>
+<p class="digest">Parameter fingerprint: {{ record.parameter_digest }}</p>
+{% endblock %}

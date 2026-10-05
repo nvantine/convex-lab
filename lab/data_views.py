@@ -4,17 +4,20 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
+from django.urls import reverse
+from django.utils import timezone
 import numpy as np
 import plotly.graph_objects as go
 from core.data import aligned_prices, content_digest, price_frame, problem_from_training, split_windows, estimates_edited
-from core.evaluation import evaluate_with_benchmark
+from core.rolling import evaluate_portfolios, rebalance_indices, refit_spec
 from core.parser import ProblemError, build_problem
-from core.providers import fetch_prices
+from core.providers import fetch_prices, last_completed_day
 from lab.forms import DatasetForm, TrainingForm, EvaluationForm
-from lab.models import Dataset, Evaluation, Experiment, Problem
+from lab.models import Dataset, Evaluation, Experiment, Problem, FetchRequest
+from lab import fetching
 from lab.request_limits import SOLVE_SLOTS
 from lab.workspaces import scoped, workspace_for
 
@@ -36,10 +39,20 @@ def data_fingerprint(payload, provenance):
 
 @login_required
 def datasets(request):
-    end = date.today()-timedelta(days=1)
+    end = last_completed_day()
     form = DatasetForm(request.POST if request.method=='POST' else None, initial={
         'name':'Market history', 'source':'alpaca','symbols':DEFAULT_SYMBOLS, 'start':end-timedelta(days=365*5), 'end':end})
+    if not request.user.is_staff:
+        form.fields['refresh_daily'].disabled=True
+        form.initial['refresh_daily']=False
     if request.method=='POST' and form.is_valid():
+        if request.POST.get('action')=='start' or len(form.cleaned_data['symbols'])>5:
+            values=form.cleaned_data
+            record=FetchRequest.objects.create(owner=request.user,workspace=workspace_for(request),name=values['name'],
+                source=values['source'],symbols=values['symbols'],start=values['start'],end=values['end'],
+                batch_size=values['batch_size'] or 5,prefer_cache=values['prefer_cache'],
+                refresh_daily=values['refresh_daily'] and request.user.is_staff)
+            return redirect('fetch_progress',pk=record.pk)
         if not SOLVE_SLOTS.acquire(blocking=False):
             response = render(request,'lab/busy.html',status=503)
             response['Retry-After'] = '3'
@@ -61,7 +74,8 @@ def datasets(request):
             form.add_error(None,str(error))
         finally:
             SOLVE_SLOTS.release()
-    return render(request,'lab/datasets.html',{'form':form,'datasets':scoped(Dataset,request),'asset_limit':settings.LAB_MAX_ASSETS})
+    return render(request,'lab/datasets.html',{'form':form,'datasets':scoped(Dataset,request),'asset_limit':settings.LAB_MAX_ASSETS,
+        'fetch_requests':scoped(FetchRequest,request),'is_owner':request.user.is_staff})
 
 
 @login_required
@@ -127,7 +141,14 @@ def save_evaluation(request,experiment,dataset,variable,window,options):
         if existing:
             return existing
     weights = evaluation_inputs(experiment,dataset,variable)
-    result = evaluate_with_benchmark(dataset.prices,weights,window,options)
+    from lab.views import limits
+    if not SOLVE_SLOTS.acquire(blocking=False):
+        raise ProblemError('Other numerical requests are running. Please retry shortly.')
+    try:
+        result = evaluate_portfolios(dataset.prices,weights,window,options,experiment.spec,variable,limits(),
+            seconds=settings.LAB_EVALUATION_SECONDS,maximum_refits=settings.LAB_MAX_REFITS)
+    finally:
+        SOLVE_SLOTS.release()
     result['provenance_notice'] = provenance_notice(experiment)
     result['runtime'] = experiment.result.get('runtime',{})
     defaults = {'owner':request.user,'workspace':workspace_for(request),'experiment':experiment,'dataset':dataset,
@@ -150,12 +171,26 @@ def evaluation_setup(request,pk):
         return HttpResponse('Evaluation needs a verified optimum with a decision vector. For a frontier, save a chosen solution first.',status=400)
     binding = experiment.spec.get('data',{})
     form = EvaluationForm(request.POST if request.method=='POST' else None,datasets=scoped(Dataset,request),variables=variables,
-        initial={'dataset':binding.get('dataset_id'),'variable':'w' if 'w' in variables else variables[0]})
+        spec=experiment.spec,initial={'dataset':binding.get('dataset_id'),'variable':'w' if 'w' in variables else variables[0]})
     if request.method=='POST' and form.is_valid():
         try:
             dataset,variable = form.cleaned_data['dataset'],form.cleaned_data['variable']
             weights = evaluation_inputs(experiment,dataset,variable)
             action = request.POST.get('action','validation')
+            if action=='review_holdout':
+                existing=existing_holdout(request,dataset)
+                if existing:
+                    messages.info(request,'The final holdout for this snapshot is already open. Returning its frozen result.')
+                    return redirect('evaluation',pk=existing.pk)
+            if form.options()['mode']=='rolling':
+                from lab.views import limits
+                window='holdout' if action=='review_holdout' else 'validation'
+                span=split_windows(dataset.prices)[window]
+                indices=rebalance_indices(price_frame(dataset.prices).index[span['start']+1:span['end']+1],form.options()['frequency'])
+                if len(indices)>settings.LAB_MAX_REFITS:
+                    raise ProblemError(f'This schedule needs {len(indices)} solves; the request limit is {settings.LAB_MAX_REFITS}. Choose a less frequent schedule.')
+                candidate,_=refit_spec(experiment.spec,dataset.prices,span['start'],np.zeros(len(weights)),form.options())
+                build_problem(candidate,limits())
             if action=='review_holdout':
                 existing = existing_holdout(request,dataset)
                 if existing:
@@ -165,7 +200,8 @@ def evaluation_setup(request,pk):
                     'options':form.options(),'workspace':str(workspace_for(request))},salt=TICKET_SALT)
                 return render(request,'lab/confirm_holdout.html',{'experiment':experiment,'dataset':dataset,
                     'weights':list(zip(dataset.prices['symbols'],weights)),'window':split_windows(dataset.prices)['holdout'],
-                    'ticket':ticket,'options':form.options(),'notice':provenance_notice(experiment)})
+                    'ticket':ticket,'options':form.options(),'notice':provenance_notice(experiment),
+                    'refit_limit':settings.LAB_MAX_REFITS,'evaluation_seconds':settings.LAB_EVALUATION_SECONDS})
             if action!='validation':
                 raise ProblemError('Choose validation or review the final holdout first.')
             saved = save_evaluation(request,experiment,dataset,variable,'validation',form.options())
@@ -211,4 +247,80 @@ def evaluation_detail(request,pk):
     rows = [{'name':name,'portfolio':value,'benchmark':evaluation.result['equal_weight']['metrics'][name]}
             for name,value in evaluation.result['portfolio']['metrics'].items()]
     allocations = list(zip(evaluation.dataset.prices['symbols'],evaluation.result['portfolio']['initial_weights']))
-    return render(request,'lab/evaluation.html',{'evaluation':evaluation,'charts':figures,'metrics':rows,'allocations':allocations})
+    return render(request,'lab/evaluation.html',{'evaluation':evaluation,'charts':figures,'metrics':rows,'allocations':allocations,
+        'trades':evaluation.result['portfolio'].get('trades',[]),'refits':enumerate(evaluation.result['portfolio'].get('refits',[]))})
+
+
+@login_required
+def rebalance_detail(request,pk,index):
+    from lab.views import limits
+    evaluation=get_object_or_404(scoped(Evaluation,request),pk=pk)
+    records=evaluation.result['portfolio'].get('refits',[])
+    if not 0<=index<len(records):
+        return HttpResponse('Unknown rolling solve.',status=404)
+    record=records[index]
+    spec,evidence=refit_spec(evaluation.experiment.spec,evaluation.dataset.prices,record['signal_index'],record['previous_weights'],evaluation.result['portfolio']['settings'])
+    if evidence['parameter_digest']!=record['parameter_digest']:
+        return HttpResponse('Estimator reconstruction differs from the frozen fingerprint. Restore the recorded dependency versions before inspecting this math.',status=409)
+    return render(request,'lab/rebalance.html',{'evaluation':evaluation,'experiment':evaluation.experiment,'record':record,'preview':build_problem(spec,limits()).preview()})
+
+
+def progress_payload(record):
+    return {'completed':len(record.series),'total':len(record.symbols),'pending':len(fetching.pending(record)),
+            'errors':record.errors,'message':record.message,'busy':bool(record.busy_until and record.busy_until>timezone.now()),
+            'available':[s for s in record.symbols if s in record.series],
+            'dataset_url':reverse('dataset',args=[record.dataset_id]) if record.dataset_id else None}
+
+
+@login_required
+def fetch_progress(request,pk):
+    record=get_object_or_404(scoped(FetchRequest,request),pk=pk)
+    return render(request,'lab/fetch_progress.html',{'record':record,'progress':progress_payload(record),
+        'available':[s for s in record.symbols if s in record.series]})
+
+
+@login_required
+@require_POST
+def fetch_batch(request,pk):
+    record=get_object_or_404(scoped(FetchRequest,request),pk=pk)
+    if not SOLVE_SLOTS.acquire(blocking=False):
+        return JsonResponse({'error':'Other requests are running. Please retry shortly.'},status=503)
+    try:
+        fetching.next_batch(record,provider=fetch_prices)
+        record.refresh_from_db()
+        return JsonResponse(progress_payload(record))
+    except ProblemError as error:
+        return JsonResponse({'error':str(error)},status=409)
+    finally:
+        SOLVE_SLOTS.release()
+
+
+@login_required
+@require_POST
+def fetch_action(request,pk):
+    from django.db.models import Q
+    from django.utils import timezone
+    record=get_object_or_404(scoped(FetchRequest,request),pk=pk)
+    now=timezone.now()
+    locked=scoped(FetchRequest,request).filter(pk=pk).filter(Q(busy_until__isnull=True)|Q(busy_until__lt=now)).update(busy_until=now+timedelta(seconds=60))
+    if not locked:
+        return HttpResponse('A batch is running. Wait before changing this request.',status=409)
+    try:
+        record.refresh_from_db()
+        action=request.POST.get('action')
+        if action=='retry':
+            record.errors={};record.batch_size=1;record.message='Retrying unfinished symbols individually.'
+        elif action=='available' and request.POST.get('confirm')=='on':
+            fetching.finalize(record,[s for s in record.symbols if s in record.series])
+        elif action=='refresh':
+            fetching.refresh_record(record,lease_owned=True)
+        elif action=='watch' and request.user.is_staff:
+            record.refresh_daily=request.POST.get('enabled')=='on'
+        else:
+            return HttpResponse('Choose an action and explicitly confirm any asset exclusions.',status=400)
+        record.save()
+    except ProblemError as error:
+        messages.error(request,str(error))
+    finally:
+        FetchRequest.objects.filter(pk=pk).update(busy_until=None)
+    return redirect('fetch_progress',pk=pk)

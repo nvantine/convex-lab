@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import time as clock
 from threading import Lock
+from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 from dotenv import dotenv_values
@@ -18,6 +19,16 @@ from curl_cffi.requests import Session
 # yfinance's shared cookie/session state is process-wide. A second concurrent
 # request gets a retry message rather than swapping another user's transport.
 YAHOO_SLOT = Lock()
+
+
+def last_completed_day(now=None):
+    """Conservative US closing-bar cutoff; weekends roll back to Friday."""
+    now = now or datetime.now(timezone.utc)
+    local = now.astimezone(ZoneInfo('America/New_York'))
+    day = local.date() if local.hour>=17 else local.date()-timedelta(days=1)
+    while day.weekday()>=5:
+        day-=timedelta(days=1)
+    return day
 
 
 class YahooBudgetSession(Session):
@@ -112,6 +123,11 @@ def fetch_prices(source, symbols, start, end, seconds=20):
         return frame.loc[mask], provenance
     except ProblemError:
         raise
-    except Exception:
+    except Exception as error:
         # Provider exceptions can include request details: never return their text.
+        code = getattr(error,'status_code',None)
+        if source=='alpaca' and code in (401,403):
+            raise ProblemError(f'Alpaca denied historical data access (HTTP {code}). Check that both keys are current and that your data subscription permits IEX historical bars.') from None
+        if source=='alpaca' and code==429:
+            raise ProblemError('Alpaca rate limit reached (HTTP 429). Wait before retrying; successful batches remain saved.') from None
         raise ProblemError(f'{source} could not fetch daily prices. Check credentials/access, ticker spelling, network connectivity, or rate limits; retry or explicitly choose another provider.') from None

@@ -74,7 +74,7 @@ class Dataset(models.Model):
 
 
 class Evaluation(models.Model):
-    """A frozen fixed-holdings evaluation; one final opening per data fingerprint."""
+    """A frozen historical evaluation; one final opening per data fingerprint."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     workspace = models.UUIDField(db_index=True)
@@ -96,3 +96,30 @@ class Evaluation(models.Model):
         if type(self).objects.filter(pk=self.pk).exists():
             raise ValidationError('Evaluations are immutable. Run a new validation evaluation to change assumptions.')
         return super().save(*args, **kwargs)
+
+
+class FetchRequest(models.Model):
+    """Resumable browser batches and a private cache; finalized datasets stay frozen."""
+    id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL,on_delete=models.PROTECT)
+    workspace = models.UUIDField(db_index=True)
+    name = models.CharField(max_length=120)
+    source = models.CharField(max_length=12)
+    symbols = models.JSONField()
+    start = models.DateField()
+    end = models.DateField()
+    batch_size = models.PositiveSmallIntegerField(default=5)
+    prefer_cache = models.BooleanField(default=True)
+    refresh_daily = models.BooleanField(default=False)
+    series = models.JSONField(default=dict)
+    provenance = models.JSONField(default=dict)
+    errors = models.JSONField(default=dict)
+    message = models.TextField(blank=True)
+    dataset = models.ForeignKey(Dataset,null=True,blank=True,on_delete=models.PROTECT)
+    busy_until = models.DateTimeField(null=True,blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True,blank=True)
+
+    class Meta:
+        ordering = ['-updated_at']
