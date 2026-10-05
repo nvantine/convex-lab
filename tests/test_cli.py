@@ -1,5 +1,6 @@
 """CLI commands use the same owner workspace and snapshots as the website."""
 import json
+from urllib.parse import urlsplit
 import pytest
 from lab.cli import main
 from lab.models import Experiment, Dataset, Evaluation
@@ -26,7 +27,7 @@ def test_cli_problem_solve_visible_on_site(owner, client, capsys):
     assert code == 0 and out["data"]["result"]["verified_optimal"]
     client.force_login(owner)
     assert b"CLI math" in client.get("/").content
-    assert client.get(out["data"]["url"].split("8000")[1]).status_code == 200
+    assert client.get(urlsplit(out["data"]["url"]).path).status_code == 200
     assert Experiment.objects.get().workspace == owner_workspace(owner)
 
 

@@ -38,6 +38,9 @@ overrides local configuration.
 Exit codes: 0 complete; 1 failed/partial execution; 2 invalid input or already
 opened holdout; 3 retryable database error; 130 interruption. For unsuccessful
 research, inspect its saved run ID and error; use runs show ID --logs.
+Reading, annotating, exporting, or publishing an existing run returns exit 0
+when that command succeeds, even if the saved research run has failed or partial
+status. Check data.status separately to learn the research outcome.
 Execution errors include error.run_id and error.run_url when a run was saved.
 A running response from an idempotent retry means the original process is still
 working: inspect that run instead of starting another.

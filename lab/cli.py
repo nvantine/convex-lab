@@ -445,7 +445,7 @@ def execute(args):
         raise CLIError("Use research run for a standalone research script.")
     if revision and args.command == "research" and revision.interface != "research":
         raise CLIError("Use backtest for a portfolio callback.")
-    if revision and revision.interface == "portfolio" and not dataset:
+    if revision and revision.interface == "portfolio" and args.command != "tests" and not dataset:
         raise CLIError("Portfolio strategies require --dataset.")
     window = getattr(args, "window", "")
     if window == "holdout" and not args.confirm_holdout:
@@ -555,7 +555,10 @@ def main(argv=None):
         data = execute(args)
         from lab.research import redact_payload
         data = redact_payload(data)
-        success = not (isinstance(data, dict) and data.get("status") in ("failed", "interrupted", "partial"))
+        executes_run = args.command in ("solve", "frontier", "backtest", "research", "tests", "sweep") or (
+            args.command == "runs" and args.action == "replay") or (
+            args.command == "datasets" and args.action in ("fetch", "resume", "refresh", "export"))
+        success = not (executes_run and isinstance(data, dict) and data.get("status") in ("failed", "interrupted", "partial"))
         print(json.dumps({"schema_version": 1, "ok": success, "data": data},
                          allow_nan=False, default=str, indent=2 if args.human else None))
         return 0 if success else 1

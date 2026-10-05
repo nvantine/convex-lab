@@ -121,3 +121,50 @@ def test_cli_solve_comparison_flags_actual_problem_constraints(scope,capsys):
     assert code==0
     assert "Constraints" in comparison["data"]["differences"]
     assert "Problem fingerprint" in comparison["data"]["differences"]
+
+
+@pytest.mark.django_db
+def test_metadata_commands_succeed_for_failed_and_partial_runs(scope, capsys):
+    for status in ("failed", "partial"):
+        run, _ = research.begin(scope, f"Recorded {status}", "research", {})
+        research.finish(run, status=status, error="Expected test failure")
+        code, shown = invoke(capsys, scope.owner, "runs", "show", run.pk)
+        assert code == 0 and shown["ok"] and shown["data"]["status"] == status
+        code, noted = invoke(capsys, scope.owner, "notes", "add", run.pk,
+                             "--kind", "bug", "--text", "Reproduce this")
+        assert code == 0 and noted["ok"] and noted["data"]["status"] == status
+        run.refresh_from_db()
+        assert len(run.notes) == 1 and run.notes[0]["text"] == "Reproduce this"
+
+
+@pytest.mark.django_db
+def test_portfolio_revision_tests_need_no_dataset(scope, capsys, tmp_path):
+    (tmp_path / "model.py").write_text("def target_weights(context, params, state): pass\n")
+    (tmp_path / "test_model.py").write_text("def test_saved_source(): assert 2 + 2 == 4\n")
+    revision = research.register(scope, tmp_path, "model.py:target_weights", "portfolio", "Portfolio source")
+    code, output = invoke(capsys, scope.owner, "tests", "run", revision.pk)
+    assert code == 0 and output["data"]["result"]["counts"]["tests"] == 1
+
+
+@pytest.mark.django_db
+def test_late_numerical_refit_failure_is_saved_as_partial_evaluation(scope, dataset, capsys, monkeypatch):
+    from core import rolling
+    from lab.models import Evaluation
+    draft = services.training_problem(scope, dataset)
+    solved = services.solve_problem(scope, draft.name, draft.spec, draft=draft)
+    real = rolling.solve
+    calls = 0
+    def fail_late(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            raise RuntimeError("numerical certification failed")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(rolling, "solve", fail_late)
+    code, output = invoke(capsys, scope.owner, "backtest", solved.pk, "--dataset", dataset.pk,
+                          "--options", '{"frequency":"daily","lookback":30}')
+    assert code == 1 and output["data"]["status"] == "partial"
+    saved = Evaluation.objects.get()
+    assert saved.result["portfolio"]["status"] == "solver_failed"
+    assert len(saved.result["portfolio"]["trades"]) == 3
+    assert saved.result["portfolio"]["failure"]["completed_refits"] == 3

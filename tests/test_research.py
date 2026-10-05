@@ -237,7 +237,7 @@ def test_two_cli_processes_share_atomic_holdout(scope,dataset,artifacts,tmp_path
 def run(c,p): return ResearchResult()
 ''')
     database=Path(settings.DATABASES["default"]["NAME"]).resolve()
-    assert database.name == "test.sqlite3"
+    assert database == Path(os.environ.get("LAB_TEST_DATABASE_PATH", settings.BASE_DIR / "test.sqlite3")).resolve()
     env={**os.environ,"LAB_DATABASE_PATH":str(database),"LAB_ARTIFACT_ROOT":str(artifacts)}
     command=[sys.executable,"-m","lab.cli","--owner",scope.owner.username,"research","run",str(revision.pk),
         "--dataset",str(dataset.pk),"--window","holdout","--confirm-holdout"]
