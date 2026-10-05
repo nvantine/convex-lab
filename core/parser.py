@@ -256,7 +256,15 @@ class Parser:
                     raise ProblemError("quad_form requires a vector and a square matrix of matching dimensions.")
                 if not x.is_constant() and not matrix.is_constant():
                     raise ProblemError("quad_form cannot optimize its vector and matrix together: the joint expression is not DCP. Fix one as a parameter.")
-            value = ATOMS[name](*(p.value for p in parts), **keywords)
+                if isinstance(matrix, cp.Parameter) and matrix.attributes["PSD"]:
+                    # CVXPY checked this parameter's PSD domain when its value was
+                    # assigned. Preserve that certificate during quad_form
+                    # canonicalization; a second sparse ARPACK check can fail to
+                    # converge on a valid, nearly singular covariance matrix.
+                    matrix = cp.psd_wrap(matrix)
+                value = cp.quad_form(x, matrix)
+            else:
+                value = ATOMS[name](*(p.value for p in parts), **keywords)
         precedence = 20 if name in ('quad_form','sum','max') else 40 if name in ('square','transpose','sum_squares') else 100
         if name in ('sum','max') and not parts[0].value.shape:
             precedence = parts[0].precedence  # Reduction of a scalar is identity.

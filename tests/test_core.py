@@ -8,7 +8,7 @@ import pytest
 
 from core.parser import Limits, ProblemError, build_problem
 from core.presets import PRESETS, get_preset
-from core.solve import solve
+from core.solve import accepted_solution, solve
 
 
 def scalar(expression="square(x)", constraints=None, sense="minimize"):
@@ -29,6 +29,46 @@ def test_min_variance_closed_form(solver):
     result = solve(build_problem(get_preset("min-variance")), solver)
     np.testing.assert_allclose(result["variables"]["w"], [.8, .2], atol=2e-5)
     assert result["optimal_value"] == pytest.approx(.008, abs=1e-7)
+
+
+def test_scs_tiny_objective_requires_objective_scale_gap_check():
+    # The 500-asset campaign case was feasible and called optimal by SCS,
+    # despite a large error relative to the known diagonal-QP optimum.
+    n = 500
+    variances = np.linspace(.00005, .0005, n)
+    spec = get_preset("min-variance")
+    spec["variables"][0]["shape"] = [n]
+    spec["parameters"][0]["value"] = np.diag(variances).tolist()
+    spec["parameters"][1]["value"] = np.zeros(n).tolist()
+    built = build_problem(spec, Limits(parameter_entries=500_000))
+    result = solve(built, "SCS")
+    expected = 1 / variances
+    expected /= expected.sum()
+    assert result["status"] == "optimal"
+    assert result["max_violation"] < 1e-5
+    assert result["relative_duality_gap"] > .01
+    assert not result["verified_optimal"]
+    assert result["optimal_value"] > expected @ np.diag(variances) @ expected * 1.2
+    reference = solve(build_problem(spec, Limits(parameter_entries=500_000)), "CLARABEL")
+    assert reference["verified_optimal"]
+    np.testing.assert_allclose(reference["variables"]["w"], expected, atol=1e-5)
+
+
+def test_legacy_scs_result_requires_new_accuracy_check():
+    assert not accepted_solution({"solver": "SCS", "verified_optimal": True})
+    assert accepted_solution({"solver": "CLARABEL", "verified_optimal": True})
+
+
+def test_psd_parameter_stays_certified_during_quadratic_canonicalization():
+    spec = get_preset("min-variance")
+    matrix = np.diag([.00005, .0002, .0005])
+    spec["variables"][0]["shape"] = [3]
+    spec["parameters"][0]["value"] = matrix.tolist()
+    spec["parameters"][1]["value"] = [0, 0, 0]
+    result = solve(build_problem(spec))
+    assert result["verified_optimal"]
+    np.testing.assert_allclose(result["variables"]["w"],
+                               (1 / np.diag(matrix)) / (1 / np.diag(matrix)).sum(), atol=1e-4)
 
 
 def test_cap_and_dual_sensitivity():

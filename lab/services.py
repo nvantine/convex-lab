@@ -6,7 +6,7 @@ import hashlib
 import json
 from django.conf import settings
 from core.parser import Limits, ProblemError, build_problem
-from core.solve import solve
+from core.solve import accepted_solution, solve
 from core.pareto import run_frontier
 from core.data import content_digest, estimates_edited, problem_from_training
 from core.rolling import evaluate_portfolios
@@ -68,7 +68,7 @@ def solve_problem(scope, name, spec, solver="CLARABEL", options=None, draft=None
 
 def choose_point(scope, parent, index):
     point = next((p for p in parent.result.get("points", []) if p["id"] == index), None)
-    if parent.kind != "frontier" or point is None or not point["result"]["verified_optimal"]:
+    if parent.kind != "frontier" or point is None or not accepted_solution(point["result"]):
         raise ProblemError("Choose a verified sampled frontier point.")
     child, _ = Experiment.objects.get_or_create(parent=parent, point_index=index, kind="chosen", defaults={
         "owner": scope.owner, "workspace": scope.workspace, "problem": parent.problem,
@@ -80,7 +80,7 @@ def choose_point(scope, parent, index):
 
 def usable_variables(experiment):
     import numpy as np
-    if experiment.kind == "frontier" or not experiment.result.get("verified_optimal"):
+    if experiment.kind == "frontier" or not accepted_solution(experiment.result):
         return []
     return [n for n, v in experiment.result["variables"].items() if v is not None and np.asarray(v).ndim == 1]
 

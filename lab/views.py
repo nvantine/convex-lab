@@ -14,7 +14,7 @@ from django.views.decorators.http import require_POST
 
 from core.parser import Limits, ProblemError, build_problem
 from core.presets import PRESETS, get_preset
-from core.solve import solve
+from core.solve import accepted_solution, solve
 from core.pareto import run_frontier
 from core.charts import frontier_charts
 from lab.forms import ProblemForm, initial_from_spec
@@ -150,6 +150,7 @@ def render_solution(request, experiment, point=None):
         {**evidence, 'latex': constraint['latex']}
         for evidence, constraint in zip(experiment.result['constraints'], preview['constraints'])]}
     return render(request, "lab/result.html", {"experiment": experiment, "preview": preview, "point": point,
+                                               "can_evaluate": accepted_solution(experiment.result),
                                                "variables": variables, "criterion_rows": criterion_rows, "estimates_edited": estimates_edited(experiment.spec)})
 
 
@@ -174,7 +175,7 @@ def choose(request, pk):
     except ValueError:
         return HttpResponse('Choose a valid point.', status=400)
     point = next((p for p in parent.result['points'] if p['id'] == index), None)
-    if point is None or not point['result']['verified_optimal']:
+    if point is None or not accepted_solution(point['result']):
         return HttpResponse('Choose a verified sampled point.', status=400)
     child = services.choose_point(request_scope(request), parent, index)
     return redirect('result', pk=child.pk)

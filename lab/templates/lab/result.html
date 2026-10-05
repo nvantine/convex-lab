@@ -24,7 +24,7 @@
 <p>Status: {{ experiment.result.selection.primary_result.status }} · Value: {{ experiment.result.selection.primary_result.optimal_value|number_display }}</p>
 <pre>{{ experiment.result.selection.tie_attempts|json_display }}</pre></details>{% endif %}
 </section>{% endif %}
-{% if not point and experiment.result.verified_optimal %}<p><a class="button" href="{% url 'evaluate' experiment.pk %}">Evaluate historical portfolio</a></p>{% endif %}
+{% if not point and can_evaluate %}<p><a class="button" href="{% url 'evaluate' experiment.pk %}">Evaluate historical portfolio</a></p>{% endif %}
 {% if experiment.spec.data %}<p>Training dataset asset order: {{ experiment.spec.data.symbols|join:', ' }}. {% if estimates_edited %}Imported training parameters were edited.{% endif %}</p>{% endif %}
 <div class="result-grid">
 <div>
@@ -36,9 +36,12 @@
     <dt>Solver</dt><dd>{{ experiment.result.solver }}</dd>
     <dt>Elapsed seconds</dt><dd>{{ experiment.result.elapsed_seconds|floatformat:3 }}</dd>
     <dt>Largest constraint violation</dt><dd>{{ experiment.result.max_violation|number_display }}</dd>
+    {% if experiment.result.relative_duality_gap != None %}<dt>Relative primal/dual gap</dt><dd>{{ experiment.result.relative_duality_gap|number_display }}</dd>{% endif %}
   </dl>
-  {% if experiment.result.verified_optimal %}<p class="success">Optimal status with checked constraint residuals (tolerance 0.00001).</p>
-  {% else %}<p class="notice">This result is not a verified optimum. An infeasible problem has no feasible solution; an unbounded objective has no finite optimum. Inaccurate or time-limited results need review.</p>{% endif %}
+  {% if experiment.result.solver == 'SCS' and not experiment.result.accuracy_check %}<p class="notice">This older SCS result predates the objective-scale gap check. Re-solve before relying on its weights.</p>
+  {% elif experiment.result.verified_optimal %}<p class="success">Solver reported optimal; constraint violation is at most 0.00001.{% if experiment.result.solver == 'SCS' %} Its reported primal/dual gap is at most 1% of the objective scale.{% endif %}</p>
+  {% else %}<p class="notice">This solution did not pass the status, feasibility, and available accuracy checks. Inspect the warnings and try another solver or objective scaling.</p>{% endif %}
+  <p><small>{% if experiment.result.accuracy_check %}{{ experiment.result.accuracy_check }}. {% endif %}These checks do not independently prove the global optimum.</small></p>
   {% for warning in experiment.result.warnings %}<p class="notice">{{ warning }}</p>{% endfor %}
 </section>
 <section>
