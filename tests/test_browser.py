@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright, expect
 from playwright.async_api import async_playwright
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
-SHOTS = Path("screenshots/milestone-1")
+SHOTS = Path(".local/browser-regression")
 
 
 def launch_options():
@@ -61,6 +61,7 @@ def test_browser_editor_results_errors_and_mobile(live_server, browser_user):
         login(page, live_server.url)
         screenshot(page, "02-home-empty")
         page.get_by_role("link", name="New problem", exact=True).click()
+        page.get_by_role("button", name="Use expression input", exact=True).click()
         expect(page.locator("#variables-editor .declaration")).to_have_count(1)
         assert_rendering(page)
         screenshot(page, "03-editor")
@@ -78,6 +79,7 @@ def test_browser_editor_results_errors_and_mobile(live_server, browser_user):
         screenshot(page, "05-expanded-chart")
         page.get_by_role("button", name="Close chart", exact=True).click()
         page.get_by_role("button", name="Clone into an editable problem").click()
+        page.get_by_role("button", name="Use expression input", exact=True).click()
         page.locator("#id_constraints").fill("sum(w) == 1\nw >= 0\nw[0] <= 0.6")
         page.get_by_role("button", name="Check math & DCP").click()
         expect(page.locator(".constraints > li")).to_have_count(3)
@@ -90,6 +92,7 @@ def test_browser_editor_results_errors_and_mobile(live_server, browser_user):
         page.goto(original_url)
         expect(page.locator(".constraints > li")).to_have_count(2)
         page.get_by_role("link", name="New problem", exact=True).click()
+        page.get_by_role("button", name="Use expression input", exact=True).click()
         page.locator("#id_expression").fill("w[0] * w[1]")
         page.get_by_role("button", name="Solve & save experiment").click()
         expect(page.get_by_text("DCP verdict: not recognized")).to_be_visible()
@@ -107,6 +110,7 @@ def test_browser_editor_results_errors_and_mobile(live_server, browser_user):
         assert_rendering(page)
         screenshot(page, "08-infeasible")
         page.get_by_role("link", name="New problem", exact=True).click()
+        page.get_by_role("button", name="Use expression input", exact=True).click()
         page.locator("#id_expression").fill("missing_mu @ w")
         page.get_by_role("button", name="Check math & DCP").click()
         expect(page.get_by_text("Unknown name 'missing_mu'", exact=False)).to_be_visible()
@@ -120,6 +124,7 @@ def test_browser_editor_results_errors_and_mobile(live_server, browser_user):
         screenshot(page, "10-promoted-variable")
         # Add/remove declarations and reject malformed raw JSON without submitting.
         page.goto(live_server.url + "/problems/new/?preset=least-squares")
+        page.get_by_role("button", name="Use expression input", exact=True).click()
         page.get_by_role("button", name="Add parameter", exact=True).click()
         row = page.locator("#parameters-editor .declaration").last
         row.locator('[data-field="name"]').fill("extra")
@@ -185,6 +190,7 @@ def test_browser_five_guest_sessions_solve_together(live_server, browser_user):
                 await page.get_by_label("Password").fill("testing-passphrase-123")
                 await page.get_by_role("button", name="Log in", exact=True).click()
                 await page.get_by_role("link", name="New problem", exact=True).click()
+                await page.get_by_role("button", name="Use expression input", exact=True).click()
                 await page.locator("#id_name").fill(f"Concurrent guest {index}")
             await asyncio.gather(*(sign_in(page, i) for i, page in enumerate(pages)))
             await asyncio.gather(*(page.get_by_role("button", name="Solve & save experiment").click() for page in pages))

@@ -4,9 +4,10 @@ An editable convex optimization notebook. Every example is a symbolic problem:
 variables, named constants, an objective, and constraints. The same parsed
 expressions produce the CVXPY problem and its displayed KaTeX mathematics.
 
-**Milestone 1:** problem editor, nine examples, DCP explanations, CLARABEL/OSQP/SCS,
-immutable saved experiments, duals, local charts, and isolated guest workspaces.
-Pareto exploration, market datasets, historical evaluation, and comparisons are
+**Milestones 1–2:** click-to-edit LaTeX or expression input, 13 editable examples,
+DCP explanations, CLARABEL/OSQP/SCS, weighted-sum and epsilon Pareto exploration,
+2D/3D/multiple-criterion charts, immutable chosen solutions, duals, and isolated
+guest workspaces. Market datasets, historical evaluation, and comparisons are
 later milestones. There are no trading endpoints, jobs, workers, or CLI.
 
 ## Run locally with uv
@@ -36,7 +37,8 @@ hosting. Server setup is a later milestone.
 1. Load **Minimum variance**. The two variance values are 0.01 and 0.04.
 2. Inspect the numbered constraints: allocations sum to 1 and are nonnegative.
 3. Solve. The known answer is approximately `[0.8, 0.2]`, with variance `0.008`.
-4. Clone the result. Add `w[0] <= 0.6`, check the math, then solve again.
+4. Clone the result. Click the constraint equation and add `w_0 \le 0.6`,
+   check the math, then solve again.
 5. Look at that cap's dual: it describes the local benefit of relaxing the cap.
 6. Try a signed portfolio, least squares, a linear program, SOCP, or CVaR.
 
@@ -45,12 +47,32 @@ Means/covariances in portfolio examples are daily quantities. Promoting a
 parameter to a variable is supported; some promotions introduce bilinear terms
 and will fail the DCP check. Failure to recognize DCP does not prove nonconvexity.
 
+## Explore tradeoffs
+
+Load **Return and risk frontier**, **Return, risk and turnover**, **Return, risk,
+turnover and concentration**, or **Least-squares fit and regularization**.
+Choose weighted sum or epsilon constraints. Each criterion has its own editable
+expression and direction; you may add your own criteria. Click a plotted point,
+inspect its mathematics and variables, then save it as the chosen solution.
+Ranges describe sampled nondominated values; anchors optimize each criterion
+alone. Interpolated lines/surfaces do not represent additional solved problems.
+
+LaTeX editing behaves like a small equation editor: click to see source, type to
+preview, click elsewhere to render. Switch to expression syntax with a button;
+expressions can embed `latex(r"\mu^{\top}w")`. Only the documented mathematical
+subset is supported, with explicit errors for unsupported notation.
+See [the input reference and Pareto walkthrough](docs/milestone-2.md).
+
 ## Code map
 
 - `core/parser.py`: explicit AST interpreter, declarations, shapes, domain checks,
   math rendering, and DCP diagnostics. No eval/exec or Django imports.
 - `core/solve.py`: fresh CVXPY solves, native solver budgets, residuals, duals,
   status, and runtime provenance. Compilation is outside the native time limit.
+- `core/latex_input.py`, `notation.py`, `input.py`: safe LaTeX conversion and
+  standard mathematical notation, shared with the original expression interpreter.
+- `core/pareto.py`, `charts.py`: anchors, scalarization, epsilon constraints,
+  tie-breaking, numerical dominance, and views of saved samples.
 - `core/presets.py`: ordinary editable problem definitions.
 - `lab/`: forms and views coordinate requests; models store drafts/snapshots.
   Templates use one base and a shared math partial; JavaScript uses the DOM only.
@@ -79,7 +101,9 @@ not a benchmark of production traffic or arbitrary large optimization problems.
 
 The owner can adjust `LAB_MAX_VARIABLE_ENTRIES` (5000),
 `LAB_MAX_PARAMETER_ENTRIES` (100000), `LAB_MAX_AST_NODES` (500), and
-`LAB_SOLVE_SECONDS` (2) in `.env`. These limit workload, not portfolio strategies.
+`LAB_SOLVE_SECONDS` (2), `LAB_MAX_CRITERIA` (8), `LAB_MAX_FRONTIER_SAMPLES` (50),
+and `LAB_FRONTIER_SECONDS` (20) in `.env`. Restart after changes. These limit
+request workload. The sweep budget checks between solves; compilation can add time.
 
 ## Tests and screenshots
 
@@ -92,8 +116,10 @@ uv run pytest -q -m browser
 ```
 
 Browser tests use a temporary database and synthetic examples, with no market API
-calls or credentials. Screenshots are saved under `screenshots/milestone-1/`.
-Milestone 1 verification: 80 unit/Django tests plus 2 real Chromium browser tests
+calls or credentials. Reviewed screenshots are saved under `screenshots/milestone-2/`;
+`milestone-1/` retains the earlier screenshots. Regression-only images go into
+ignored `.local/browser-regression/`.
+Milestone 2 verification: 158 unit/Django tests and 4 real Chromium browser tests
 passed; Django checks and migration consistency checks passed. Five guest
 browser contexts solved simultaneously and could not open one another's results.
 See [the short code/math walkthrough](docs/milestone-1.md).
