@@ -7,6 +7,7 @@ later. This is simulated research, never an account or execution client.
 
 from copy import deepcopy
 from time import monotonic
+import traceback
 import numpy as np
 import pandas as pd
 import sklearn
@@ -213,6 +214,7 @@ def portfolio_path(
     borrow_total = financing_total = 0.0
     status = "complete"
     warnings = []
+    failure = None
     initial_weights = None
     state = None
     rng = np.random.default_rng(seed)
@@ -262,10 +264,17 @@ def portfolio_path(
                     options.get("solver", "CLARABEL"),
                     seconds=min(2, max(0.01, seconds - (monotonic() - start))),
                 )
-            except ProblemError as error:
+            except Exception as error:
                 if i == 0:
                     raise
                 status = "solver_failed"
+                failure = {"stage": "rolling_refit", "exception": type(error).__name__,
+                           "message": str(error), "signal_index": signal_index,
+                           "signal_date": str(all_prices.index[signal_index].date()),
+                           "trade_date": str(day.date()), "completed_observations": len(wealths),
+                           "completed_refits": len(refits)}
+                if not isinstance(error, ProblemError):
+                    failure["traceback"] = traceback.format_exc()
                 warnings.append(
                     f"Refit for {day.date()} failed: {error}. Stopped before that trade."
                 )
@@ -388,6 +397,7 @@ def portfolio_path(
         "ending_cash": cash,
         "window": span,
         "warnings": warnings,
+        "failure": failure,
         "trades": trades,
         "refits": refits,
         "elapsed_seconds": monotonic() - start,

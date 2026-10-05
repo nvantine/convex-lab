@@ -9,6 +9,11 @@
 <p>{{ evaluation.result.portfolio.timing }}</p>
 {% if evaluation.window == 'holdout' %}<p class="notice">The final holdout has been opened. This frozen result is the final evaluation for this data fingerprint; future tuning must be described as exploratory.</p>{% else %}<p><a href="{% url 'evaluate' evaluation.experiment.pk %}">Evaluate with other validation assumptions</a></p>{% endif %}
 {% for warning in evaluation.result.portfolio.warnings %}<p class="notice">{{ warning }}</p>{% endfor %}
+{% if evaluation.result.portfolio.failure %}<section><h2>Stopped refit</h2>
+<p>Completed {{ evaluation.result.portfolio.failure.completed_observations }} observations and {{ evaluation.result.portfolio.failure.completed_refits }} refits before the {{ evaluation.result.portfolio.failure.trade_date }} trade.</p>
+<p>{{ evaluation.result.portfolio.failure.exception }}: {{ evaluation.result.portfolio.failure.message }}</p>
+{% if evaluation.result.portfolio.failure.traceback %}<details><summary>Numerical error traceback</summary><pre>{{ evaluation.result.portfolio.failure.traceback }}</pre></details>{% endif %}
+</section>{% endif %}
 <section><h2>Metrics compared with equal weight</h2>
 <p>Returns, CAGR, volatility, and drawdown are fractions (0.08 means 8%). CAGR uses elapsed calendar years; volatility and Sharpe use an approximate 252 observations per year. Short samples make annualized values unstable. Undefined ratios are shown as unavailable.</p>
 <p class="table-hint"><small>Scroll the table horizontally to see both portfolios.</small></p>

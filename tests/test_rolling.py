@@ -111,6 +111,30 @@ def test_late_solver_failure_keeps_completed_prefix_and_same_benchmark_schedule(
     assert chosen['trading_cost']==pytest.approx(sum(t['cost'] for t in chosen['trades']))
 
 
+def test_unexpected_late_refit_error_keeps_partial_path_and_failure_date(prices, monkeypatch):
+    spec, _, _ = problem_from_training(prices, 'min-variance')
+    real = rolling.solve
+    calls = 0
+    def fail_late(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            raise RuntimeError('numerical certification failed')
+        return real(*args, **kwargs)
+    monkeypatch.setattr(rolling, 'solve', fail_late)
+    result = rolling.evaluate_portfolios(prices, [.5, .5], 'validation',
+        dict(mode='rolling', frequency='daily', lookback=30, covariance_parameter='Sigma'), spec, 'w', Limits())
+    path = result['portfolio']
+    assert path['status'] == 'solver_failed'
+    assert len(path['wealth']) == len(path['trades']) == len(path['refits']) == 3
+    assert result['equal_weight']['dates'] == path['dates']
+    assert path['failure']['exception'] == 'RuntimeError'
+    assert path['failure']['signal_date'] < path['failure']['trade_date']
+    assert path['failure']['completed_observations'] == 3
+    assert path['failure']['completed_refits'] == 3
+    assert 'RuntimeError: numerical certification failed' in path['failure']['traceback']
+
+
 def test_first_failure_and_refit_limit_do_not_save_partial_path(prices,monkeypatch):
     spec,_,_=problem_from_training(prices,'min-variance')
     with pytest.raises(ProblemError,match='request limit'):

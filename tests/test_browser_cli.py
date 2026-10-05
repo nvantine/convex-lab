@@ -49,6 +49,48 @@ def test_cli_owner_result_on_website(live_server, owner):
         browser.close()
 
 
+def test_partial_rolling_evidence_is_readable_on_website(live_server, owner, monkeypatch):
+    from core import rolling
+    from core.data import aligned_prices
+    from lab.models import Dataset
+    from test_data import synthetic_frame
+    scope = Scope(owner, owner_workspace(owner))
+    payload, _ = aligned_prices(synthetic_frame(), ["SPY", "AGG"])
+    dataset = Dataset.objects.create(owner=owner, workspace=scope.workspace, name="Partial path data",
+                                     source="synthetic", prices=payload, provenance={}, digest="partial-path-data")
+    draft = services.training_problem(scope, dataset)
+    solved = services.solve_problem(scope, draft.name, draft.spec, draft=draft)
+    real = rolling.solve
+    calls = 0
+    def fail_late(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 4:
+            raise RuntimeError("numerical certification failed")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(rolling, "solve", fail_late)
+    evaluation = services.save_evaluation(scope, solved, dataset, "w", "validation",
+        {"mode": "rolling", "frequency": "daily", "lookback": 30,
+         "covariance_parameter": "Sigma", "mean_parameter": "mu"})
+    assert evaluation.result["portfolio"]["status"] == "solver_failed"
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch_options())
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        errors = []; page.on("pageerror", lambda e: errors.append(str(e)))
+        login_owner(page, live_server.url, owner)
+        page.goto(f"{live_server.url}/evaluations/{evaluation.pk}/")
+        expect(page.get_by_role("heading", name="Stopped refit")).to_be_visible()
+        expect(page.get_by_role("heading", name="Stopped refit").locator("..")
+               .get_by_text("RuntimeError: numerical certification failed", exact=True)).to_be_visible()
+        expect(page.get_by_role("heading", name="Simulated trades and rolling solves")).to_be_visible()
+        expect(page.get_by_text("Numerical error traceback")).to_be_visible()
+        shot(page, "fixes", "01-partial-evaluation")
+        page.set_viewport_size({"width": 390, "height": 844})
+        shot(page, "fixes", "02-partial-evaluation-mobile")
+        assert not errors
+        browser.close()
+
+
 def test_custom_research_source_errors_and_live_update(live_server, owner, settings, tmp_path):
     from lab import research
     settings.LAB_ARTIFACT_ROOT = tmp_path / "artifacts"
