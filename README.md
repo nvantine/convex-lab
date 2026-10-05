@@ -4,11 +4,12 @@ An editable convex optimization notebook. Every example is a symbolic problem:
 variables, named constants, an objective, and constraints. The same parsed
 expressions produce the CVXPY problem and its displayed KaTeX mathematics.
 
-**Milestones 1–2:** click-to-edit LaTeX or expression input, 13 editable examples,
+**Milestones 1–3:** click-to-edit LaTeX or expression input, 13 editable examples,
 DCP explanations, CLARABEL/OSQP/SCS, weighted-sum and epsilon Pareto exploration,
 2D/3D/multiple-criterion charts, immutable chosen solutions, duals, and isolated
-guest workspaces. Market datasets, historical evaluation, and comparisons are
-later milestones. There are no trading endpoints, jobs, workers, or CLI.
+guest workspaces, Alpaca/yfinance historical snapshots, training-only covariance
+estimates, and signed fixed-holdings evaluation. Comparisons and server-demo setup
+are the next milestone. There are no trading endpoints, jobs, workers, or CLI.
 
 ## Run locally with uv
 
@@ -27,7 +28,10 @@ laptop; its credentials are in `.local/guest-login.txt`. Open that file locally.
 The command never prints the password and rerunning it does not reset it.
 `.local/`, `.env`, databases, and secrets are ignored by Git.
 
-No API keys are needed in this milestone. The development secret is generated in
+Synthetic examples need no API keys. Alpaca reuses the existing private
+`../portfolio-lab/.env` by default; choosing yfinance requires no keys.
+See [credential setup and the data walkthrough](docs/milestone-3.md).
+The development secret is generated in
 `.local/django-secret`. For your future server, set a new private secret,
 `DJANGO_DEBUG=false`, explicit allowed hosts, and HTTPS; do not use runserver for
 hosting. Server setup is a later milestone.
@@ -63,6 +67,24 @@ expressions can embed `latex(r"\mu^{\top}w")`. Only the documented mathematical
 subset is supported, with explicit errors for unsupported notation.
 See [the input reference and Pareto walkthrough](docs/milestone-2.md).
 
+## Use historical data
+
+Open **Datasets**, choose Alpaca or yfinance, enter actual ticker symbols, and
+fetch a date window. The completed request opens a frozen snapshot. Create an
+editable portfolio problem from training estimates; choose sample or Ledoit–Wolf
+covariance and an optional lookback. Every equation and constant stays editable.
+Displays use the minimum grouping needed to preserve mathematical meaning.
+
+Solve, then **Evaluate fixed holdings** on validation. Choose explicit entry
+costs, short borrow, cash financing, and the risk-free rate for Sharpe. Compare
+with equal weight using equity/drawdown charts. This is a fixed-holdings test,
+with no rebalances/refits or exit fee. Adjusted prices approximate total returns.
+
+The split is chronological 60/20/20. Training alone estimates parameters;
+validation supports exploration. Final prices are hidden until an explicit
+confirmation saves one frozen holdout evaluation per identical data fingerprint.
+See [assumptions, accounting, and limitations](docs/milestone-3.md).
+
 ## Code map
 
 - `core/parser.py`: explicit AST interpreter, declarations, shapes, domain checks,
@@ -74,7 +96,11 @@ See [the input reference and Pareto walkthrough](docs/milestone-2.md).
 - `core/pareto.py`, `charts.py`: anchors, scalarization, epsilon constraints,
   tie-breaking, numerical dominance, and views of saved samples.
 - `core/presets.py`: ordinary editable problem definitions.
+- `core/providers.py`, `data.py`: historical clients, immutable price payloads,
+  chronological windows, and training estimates without Django imports.
+- `core/evaluation.py`: signed fixed units, entry fees, carry, and metrics.
 - `lab/`: forms and views coordinate requests; models store drafts/snapshots.
+  `data_views.py` handles the new data/evaluation flows. Four custom models total.
   Templates use one base and a shared math partial; JavaScript uses the DOM only.
 - `config/`: standard Django configuration, routing, and private local settings.
 - `tests/`: analytic math tests, Django requests, and real-browser interactions.
@@ -93,16 +119,19 @@ Logout ends access to that workspace; logging back in starts a new one. Owner
 work persists between browsers. All reads, edits, and clones are scoped on the
 server. Guest accounts cannot access Django admin.
 
-Up to five numerical solves run at once in one web process. Extra requests receive
+Up to five solves or data fetches run at once in one web process. Extra requests receive
 a retry message, never a queue. Each solve has new CVXPY objects, and solving is
 outside database transactions. SQLite uses WAL and a 30-second busy timeout.
 Capacity tests use independent sessions. This is a small single-process demo,
 not a benchmark of production traffic or arbitrary large optimization problems.
+yfinance fetches are serialized because of the library's shared cookie/session
+state; a concurrent request receives a retry message rather than waiting in a queue.
 
 The owner can adjust `LAB_MAX_VARIABLE_ENTRIES` (5000),
 `LAB_MAX_PARAMETER_ENTRIES` (100000), `LAB_MAX_AST_NODES` (500), and
 `LAB_SOLVE_SECONDS` (2), `LAB_MAX_CRITERIA` (8), `LAB_MAX_FRONTIER_SAMPLES` (50),
-and `LAB_FRONTIER_SECONDS` (20) in `.env`. Restart after changes. These limit
+and `LAB_FRONTIER_SECONDS` (20), `LAB_MAX_ASSETS` (20), `LAB_MAX_PRICE_ROWS` (5000),
+and `LAB_FETCH_SECONDS` (20) in `.env`. Restart after changes. These limit
 request workload. The sweep budget checks between solves; compilation can add time.
 
 ## Tests and screenshots
@@ -116,12 +145,16 @@ uv run pytest -q -m browser
 ```
 
 Browser tests use a temporary database and synthetic examples, with no market API
-calls or credentials. Reviewed screenshots are saved under `screenshots/milestone-2/`;
-`milestone-1/` retains the earlier screenshots. Regression-only images go into
-ignored `.local/browser-regression/`.
-Milestone 2 verification: 158 unit/Django tests and 4 real Chromium browser tests
+calls or credentials. Fifteen reviewed screenshots are saved under
+`screenshots/milestone-3/`; milestones 1 and 2 retain their historical screenshots.
+Regression-only images go into ignored `.local/browser-regression/` and
+`.local/browser-regression-m2/`. Run `uv run pytest -m '' -q` for the complete
+serial suite; do not run two Django test processes against the same test database.
+Milestone 3 verification: 232 unit/Django tests and 6 Chromium browser tests
 passed; Django checks and migration consistency checks passed. Five guest
 browser contexts solved simultaneously and could not open one another's results.
+Live historical checks for both Alpaca and yfinance returned 60 SPY price dates
+for January–March 2025. Unit tests cover provider failures without network calls.
 See [the short code/math walkthrough](docs/milestone-1.md).
 For an existing Chromium-based browser, optionally set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/browser` before the browser test command.

@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright, expect
 from test_browser import launch_options, login, assert_rendering, browser_user
 
 pytestmark = [pytest.mark.browser, pytest.mark.django_db(transaction=True)]
-SHOTS = Path('screenshots/milestone-2')
+SHOTS = Path('.local/browser-regression-m2')
 
 
 def shot(page, name):
