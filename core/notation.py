@@ -16,39 +16,38 @@ def symbol(name):
     return r'\mathrm{' + name.replace('_', r'\_') + '}'
 
 
+def grouped(part, minimum=100):
+    """Parenthesize only when the parent operation would change the grouping."""
+    return rf'\left({part.latex}\right)' if part.precedence < minimum else part.latex
+
+
 def atom_math(name, parts, keywords):
-    """Use the compiled shapes so a matrix Frobenius norm is never spectral norm."""
+    """Use precedence and compiled shapes, rather than wrapping every argument."""
     a = parts[0].latex
     shape = parts[0].value.shape
     if name == 'quad_form':
-        return rf'\left({a}\right)^{{\top}} {parts[1].latex} \left({a}\right)'
+        return rf'{grouped(parts[0], 40)}^{{\top}} {grouped(parts[1], 20)} {grouped(parts[0], 20)}'
     if name == 'transpose':
-        return rf'\left({a}\right)^{{\top}}'
+        return rf'{grouped(parts[0], 40)}^{{\top}}'
     if name == 'square':
-        return rf'\left({a}\right)^{{' + ('2' if not shape else r'\circ 2') + '}'
+        return grouped(parts[0], 40) + '^{' + ('2' if not shape else r'\circ 2') + '}'
     if name == 'sum_squares':
         p = 'F' if len(shape) == 2 else '2'
-        return rf'\left\|{a}\right\|_{{{p}}}^2' if shape else rf'\left({a}\right)^2'
-    if name == 'sum':
+        return rf'\left\|{a}\right\|_{{{p}}}^2' if shape else grouped(parts[0], 40) + '^2'
+    if name in ('sum', 'max'):
         if not shape:
             return a
         if 'axis' in keywords:
             direction = 'rows' if keywords['axis'] == 0 else 'columns'
-            return rf'\sum_{{\mathrm{{{direction}}}}}\left({a}\right)'
+            return rf'\{name}_{{\mathrm{{{direction}}}}}{grouped(parts[0])}'
         index = 'i,j' if len(shape) == 2 else 'i'
-        return rf'\sum_{{{index}}}\left({a}\right)_{{{index}}}'
+        return rf'\{name}_{{{index}}}{grouped(parts[0])}_{{{index}}}'
     if name == 'abs':
         return rf'\left|{a}\right|'
     if name == 'pos':
         return rf'\max\left\{{{a},0\right\}}'
     if name == 'maximum':
         return rf'\max\left\{{{a},{parts[1].latex}\right\}}'
-    if name == 'max':
-        if 'axis' in keywords:
-            direction = 'rows' if keywords['axis'] == 0 else 'columns'
-            return rf'\max_{{\mathrm{{{direction}}}}}\left({a}\right)'
-        index = 'i,j' if len(shape) == 2 else 'i'
-        return rf'\max_{{{index}}}\left({a}\right)_{{{index}}}' if shape else a
     if name in {'hstack', 'vstack'}:
         separator = ' & ' if name == 'hstack' else r'\\'
         return r'\begin{bmatrix}' + separator.join(p.latex for p in parts) + r'\end{bmatrix}'

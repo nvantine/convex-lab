@@ -134,3 +134,38 @@ def test_notation_conversion_respects_owner_limits():
     limits = Limits(variable_entries=6000)
     source = editable_spec(spec, 'latex', limits)
     assert build_problem(convert_spec(source, 'latex', limits), limits).problem.is_dcp()
+
+
+def test_standard_portfolio_math_has_no_unnecessary_parentheses():
+    spec = get_preset('mean-variance')
+    assert expression_source(spec['objective']['expression'], spec) == r'\mu^{\top} w - \mathrm{risk\_aversion}  w^{\top} \Sigma w'
+    preview = build_problem(spec).preview()
+    assert r'\left(' not in preview['objective']['latex']
+    assert preview['constraints'][0]['latex'] == r'\sum_{i}w_{i} = 1'
+
+
+@pytest.mark.parametrize('source, grouping', [
+    ('3 * (w[0] + w[1])', True),
+    ('w[0] - (w[1] + 2)', True),
+    ('square(w[0] + w[1])', True),
+    ('-(w[0] - w[1])', True),
+    ('(w[0] + w[1]) / 3', False),
+    ('w[0] * 3', False),
+    ('sum(w)', False),
+    ('quad_form(w, Sigma)', False),
+])
+def test_minimal_grouping_roundtrips_without_changing_values(source, grouping):
+    spec = get_preset('min-variance')
+    rendered = expression_source(source,spec)
+    assert (r'\left(' in rendered) == grouping
+    converted = to_expression(rendered,shapes(spec))
+    before, after = build_problem(spec), build_problem(spec)
+    for built in (before,after):
+        built.names['w'].value = [.2,.8]
+    from core.parser import Parser, Limits
+    for parser, expression in [(Parser(before.names,{},Limits()),source),(Parser(after.names,{},Limits()),converted)]:
+        value = parser.expression(parser.tree(expression)).value.value
+        if expression == source:
+            original = value
+        else:
+            np.testing.assert_allclose(value,original)

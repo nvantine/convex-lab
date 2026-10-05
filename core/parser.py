@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import cvxpy as cp
 import numpy as np
-from core.notation import atom_math, symbol
+from core.notation import atom_math, grouped, symbol
 
 
 class ProblemError(ValueError):
@@ -33,6 +33,7 @@ class Expression:
     value: cp.Expression
     latex: str
     row: bool = False
+    precedence: int = 100
 
 
 @dataclass
@@ -137,10 +138,12 @@ class Parser:
         if isinstance(node, ast.Name):
             if node.id not in self.names:
                 raise ProblemError(f"Unknown name '{node.id}'. Declare it as a variable or parameter.")
-            return Expression(self.names[node.id], self.substitutions.get(node.id, symbol(node.id)))
+            latex = self.substitutions.get(node.id, symbol(node.id))
+            negative = node.id in self.substitutions and float(self.names[node.id].value) < 0
+            return Expression(self.names[node.id], latex, precedence=30 if negative else 100)
         if isinstance(node, ast.Constant) and type(node.value) in (int, float):
             array = numeric(node.value)
-            return Expression(cp.Constant(array), number(array))
+            return Expression(cp.Constant(array), number(array), precedence=30 if array < 0 else 100)
         if isinstance(node, (ast.List, ast.Tuple)):
             # Literal arrays contain only numbers; expression lists belong to stacking calls.
             try:
@@ -153,40 +156,46 @@ class Parser:
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             a = child(node.operand)
             return Expression(-a.value if isinstance(node.op, ast.USub) else a.value,
-                              ("-" if isinstance(node.op, ast.USub) else "+") + r"\left(" + a.latex + r"\right)", a.row)
+                              ("-" if isinstance(node.op, ast.USub) else "+") + grouped(a, 31), a.row, 30)
         if isinstance(node, ast.BinOp):
             a, b = child(node.left), child(node.right)
             if isinstance(node.op, ast.Add):
                 value, latex = a.value + b.value, f"{a.latex} + {b.latex}"
             elif isinstance(node.op, ast.Sub):
-                value, latex = a.value - b.value, f"{a.latex} - \\left({b.latex}\\right)"
+                value, latex = a.value - b.value, f"{a.latex} - {grouped(b, 11 if b.precedence != 30 else 31)}"
             elif isinstance(node.op, ast.Mult):
                 value = cp.multiply(a.value, b.value)
-                operator = r"\odot" if a.value.shape and b.value.shape else r"\cdot"
-                latex = rf"\left({a.latex}\right) {operator} \left({b.latex}\right)"
+                if a.value.shape and b.value.shape:
+                    operator = r"\odot"
+                elif (a.value.is_constant() and b.value.is_constant() and not a.value.shape and not b.value.shape) or b.precedence == 30 or b.latex[:1].isdigit():
+                    operator = r"\cdot"
+                else:
+                    operator = ""
+                latex = f"{grouped(a, 20)} {operator} {grouped(b, 20)}"
             elif isinstance(node.op, ast.MatMult):
                 value = a.value @ b.value
                 left = a.latex
                 if a.value.ndim == 1 and b.value.ndim >= 1 and not a.row:
-                    left = rf"\left({left}\right)^{{\top}}"
-                latex = rf"\left({left}\right) \left({b.latex}\right)"
+                    left = grouped(a, 40) + r"^{\top}"
+                latex = f"{grouped(a, 20) if a.value.ndim != 1 or a.row else left} {grouped(b, 21 if isinstance(node.right, ast.BinOp) and isinstance(node.right.op, ast.Mult) and b.value.shape else 20)}"
             elif isinstance(node.op, ast.Div):
                 if b.value.is_constant() and b.value.value is not None and np.any(b.value.value == 0):
                     raise ProblemError("Division by zero is undefined.")
                 value, latex = a.value / b.value, f"\\frac{{{a.latex}}}{{{b.latex}}}"
             elif isinstance(node.op, ast.Pow) and isinstance(node.right, ast.Constant) and node.right.value == 2:
-                value, latex = cp.square(a.value), f"\\left({a.latex}\\right)^2"
+                value, latex = cp.square(a.value), atom_math("square", [a], {})
             else:
                 raise ProblemError("Allowed operators: +, -, *, /, @, and **2. Use @ for matrix products; * is elementwise.")
             row = False
             if value.ndim == 1:
                 row = a.value.ndim == 1 if isinstance(node.op, ast.MatMult) else (a.row or b.row)
-            return Expression(value, latex, row)
+            precedence = 10 if isinstance(node.op, (ast.Add, ast.Sub)) else 40 if isinstance(node.op, ast.Pow) else 100 if isinstance(node.op, ast.Div) else 20
+            return Expression(value, latex, row, precedence)
         if isinstance(node, ast.Subscript):
             a = child(node.value)
             index = self.index(node.slice)
             label = (", ".join(ast.unparse(x) for x in node.slice.elts) if isinstance(node.slice, ast.Tuple) else ast.unparse(node.slice)).replace("_", r"\_")
-            return Expression(a.value[index], f"{a.latex}_{{{label}}}")
+            return Expression(a.value[index], f"{grouped(a, 40)}_{{{label}}}")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ATOMS:
             return self.call(node, depth)
         raise ProblemError("Only declared names, numeric literals, indexing, arithmetic, and listed atoms are allowed. Python attributes and code are not expressions.")
@@ -247,7 +256,8 @@ class Parser:
                 if not x.is_constant() and not matrix.is_constant():
                     raise ProblemError("quad_form cannot optimize its vector and matrix together: the joint expression is not DCP. Fix one as a parameter.")
             value = ATOMS[name](*(p.value for p in parts), **keywords)
-        return Expression(value, atom_math(name, parts, keywords), not parts[0].row if name == 'transpose' and value.ndim == 1 else False)
+        return Expression(value, atom_math(name, parts, keywords), not parts[0].row if name == 'transpose' and value.ndim == 1 else False,
+                          20 if name == 'quad_form' else 40 if name in ('square', 'transpose') else 100)
 
 
 def build_problem(spec, limits=None):
