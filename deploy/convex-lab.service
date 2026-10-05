@@ -1,0 +1,17 @@
+[Unit]
+Description=Convex Lab Django demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=YOUR_USER
+WorkingDirectory=/srv/convex-lab
+ExecStart=/srv/convex-lab/.venv/bin/gunicorn --config deploy/gunicorn.conf.py config.wsgi:application
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+UMask=0077
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

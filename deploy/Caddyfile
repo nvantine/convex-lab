@@ -1,0 +1,9 @@
+lab.example.com {
+	handle_path /static/* {
+		root * /srv/convex-lab/staticfiles
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8020
+	}
+}

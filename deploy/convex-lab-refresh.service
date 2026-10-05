@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh watched historical prices for Convex Lab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=YOUR_USER
+WorkingDirectory=/srv/convex-lab
+ExecStart=/srv/convex-lab/.venv/bin/python manage.py refresh_datasets --owner YOUR_DJANGO_USERNAME --max-batches 200
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=OMP_NUM_THREADS=1
+UMask=0077
+TimeoutStartSec=4h

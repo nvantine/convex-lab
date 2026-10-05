@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily historical prices after US market close
+
+[Timer]
+# 18:30 New York in summer; 17:30 in winter. Past the 17:00 completion cutoff.
+OnCalendar=Mon..Fri *-*-* 22:30:00 UTC
+Persistent=true
+Unit=convex-lab-refresh.service
+
+[Install]
+WantedBy=timers.target
