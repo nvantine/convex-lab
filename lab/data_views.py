@@ -19,7 +19,8 @@ from lab.forms import DatasetForm, TrainingForm, EvaluationForm
 from lab.models import Dataset, Evaluation, Experiment, Problem, FetchRequest
 from lab import fetching
 from lab.request_limits import SOLVE_SLOTS
-from lab.workspaces import scoped, workspace_for
+from lab.workspaces import scoped, workspace_for, request_scope
+from lab import services
 
 DEFAULT_SYMBOLS = 'SPY, QQQ, IWM, EFA, EEM, AGG, TLT, LQD, HYG, GLD, VNQ, XLE, XLK, XLV, XLF, DBC'
 TICKET_SALT = 'convex-lab-final-holdout'
@@ -86,11 +87,7 @@ def dataset_detail(request,pk):
     if request.method=='POST' and form.is_valid():
         try:
             from lab.views import limits
-            spec, estimate, digest = problem_from_training(dataset.prices,**form.cleaned_data)
-            spec['data'] = {'dataset_id':str(dataset.pk),'dataset_digest':dataset.digest,'symbols':dataset.prices['symbols'],
-                'estimation':estimate,'estimates_digest':digest}
-            build_problem(spec,limits())
-            draft = Problem.objects.create(owner=request.user,workspace=workspace_for(request),name=(dataset.name+' · '+form.cleaned_data['preset'])[:120],spec=spec)
+            draft = services.training_problem(request_scope(request), dataset, **form.cleaned_data)
             return redirect('edit',pk=draft.pk)
         except ProblemError as error:
             form.add_error(None,str(error))
@@ -107,60 +104,19 @@ def dataset_detail(request,pk):
         'holdout':existing_holdout(request,dataset)})
 
 
-def usable_variables(experiment):
-    if experiment.kind=='frontier' or not experiment.result.get('verified_optimal'):
-        return []
-    return [name for name,value in experiment.result['variables'].items() if value is not None and np.asarray(value).ndim==1]
+usable_variables = services.usable_variables
+evaluation_inputs = services.evaluation_inputs
+provenance_notice = services.provenance_notice
 
 
-def evaluation_inputs(experiment,dataset,variable):
-    names = usable_variables(experiment)
-    if variable not in names:
-        raise ProblemError('Choose a decision vector from a verified optimum. Save a frontier point as the chosen solution first.')
-    binding = experiment.spec.get('data')
-    if binding and (binding['dataset_digest']!=dataset.digest or binding['symbols']!=dataset.prices['symbols']):
-        raise ProblemError('This solution was bound to a different data snapshot or asset order. Create an editable problem from this dataset before solving.')
-    weights = experiment.result['variables'][variable]
-    if len(weights)!=len(dataset.prices['symbols']):
-        raise ProblemError('Decision vector length must match the dataset asset count. Entries follow the displayed asset order.')
-    return weights
-
-
-def provenance_notice(experiment):
-    edited = estimates_edited(experiment.spec)
-    if edited is None:
-        return 'No imported training estimates are attached: these weights are a manually defined portfolio experiment.'
-    if edited:
-        return 'Imported training parameters were edited. Their original estimation provenance no longer certifies the current parameter values.'
-    return 'Imported estimates and scenarios are unchanged and use training observations only.'
-
-
-def save_evaluation(request,experiment,dataset,variable,window,options):
-    if window=='holdout':
-        existing = existing_holdout(request,dataset)
-        if existing:
-            return existing
-    weights = evaluation_inputs(experiment,dataset,variable)
-    from lab.views import limits
+def save_evaluation(request, experiment, dataset, variable, window, options):
     if not SOLVE_SLOTS.acquire(blocking=False):
         raise ProblemError('Other numerical requests are running. Please retry shortly.')
     try:
-        result = evaluate_portfolios(dataset.prices,weights,window,options,experiment.spec,variable,limits(),
-            seconds=settings.LAB_EVALUATION_SECONDS,maximum_refits=settings.LAB_MAX_REFITS)
+        return services.save_evaluation(request_scope(request), experiment, dataset, variable, window,
+                                        options, evaluator=evaluate_portfolios)
     finally:
         SOLVE_SLOTS.release()
-    result['provenance_notice'] = provenance_notice(experiment)
-    result['runtime'] = experiment.result.get('runtime',{})
-    defaults = {'owner':request.user,'workspace':workspace_for(request),'experiment':experiment,'dataset':dataset,
-        'dataset_digest':dataset.digest,'variable':variable,'window':window,'result':result,
-        'digest':content_digest({'experiment':experiment.digest,'dataset':dataset.digest,'variable':variable,'window':window,'options':options})}
-    if window=='holdout':
-        # Numerical work finished before get_or_create's short DB transaction.
-        saved,_ = Evaluation.objects.get_or_create(owner=request.user,workspace=workspace_for(request),
-            dataset_digest=dataset.digest,window='holdout',defaults={k:v for k,v in defaults.items()
-            if k not in ('owner','workspace','dataset_digest','window')})
-        return saved
-    return Evaluation.objects.create(**defaults)
 
 
 @login_required

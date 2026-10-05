@@ -16,6 +16,20 @@ dependencies = [
   "gunicorn==26.2.0",
 ]
 
+[project.scripts]
+convex-lab = "lab.cli:main"
+
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["core*", "lab*", "config*"]
+
+[tool.setuptools.package-data]
+lab = ["templates/lab/*.html", "static/**/*"]
+
+
 [dependency-groups]
 dev = ["pytest==9.1.1", "pytest-django==4.14.0", "playwright==1.63.0"]
 

@@ -8,3 +8,6 @@ __pycache__/
 staticfiles/
 .local/
 playwright-report/
+*.egg-info/
+dist/
+build/

@@ -7,11 +7,15 @@ environments, dependencies, and tests. Make small conventional commits and
 report git status/log, verification, screenshots, and limitations.
 
 `core/` is pure Python with no Django imports. `lab/` is the single custom Django
-app. Interpret whitelisted AST nodes explicitly; never use eval/exec, run uploaded
-code, or hide strategy-specific constraints outside the editable specification.
+app. Interpret whitelisted AST nodes explicitly; never use eval/exec in the
+symbolic parser or hide constraints outside the editable specification.
+The approved CLI plan allows trusted local Python files and packages through
+an explicit research SDK. Keep that execution separate from the web parser;
+do not execute Python uploaded through website forms.
 Math rendering and solver construction must share the parsed expressions.
 
-No trading/accounts/positions endpoints or general agent CLI. The latest user
+No trading/accounts/positions endpoints. The approved CLI shares the owner's
+workspace with Django and supports saved research and tests. The earlier user
 request adds resumable browser batch fetching, an optional scheduled Django data
 refresh command, and historical rolling re-optimization/rebalancing. Keep solves
 synchronous and avoid a general worker/queue. Preserve immutable experiments and per-session guest

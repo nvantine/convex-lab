@@ -21,14 +21,12 @@ from lab.forms import ProblemForm, initial_from_spec
 from lab.models import Experiment, Problem, Evaluation, Dataset
 from core.data import estimates_edited
 from lab.request_limits import SOLVE_SLOTS
-from lab.workspaces import scoped, workspace_for
+from lab.workspaces import scoped, workspace_for, request_scope
+from lab import services
 
 
 
-def limits():
-    return Limits(variable_entries=settings.LAB_MAX_VARIABLE_ENTRIES,
-                  parameter_entries=settings.LAB_MAX_PARAMETER_ENTRIES, ast_nodes=settings.LAB_MAX_AST_NODES, criteria=settings.LAB_MAX_CRITERIA)
-
+limits = services.limits
 
 @login_required
 def home(request):
@@ -71,24 +69,10 @@ def editor(request, pk=None):
                         response["Retry-After"] = "3"
                         return response
                     try:
-                        if built.criteria:
-                            result = run_frontier(spec, form.frontier_options(), limits(),
-                                maximum_samples=settings.LAB_MAX_FRONTIER_SAMPLES,
-                                total_seconds=settings.LAB_FRONTIER_SECONDS, solve_seconds=settings.LAB_SOLVE_SECONDS)
-                        else:
-                            result = solve(built, form.cleaned_data["solver"], seconds=settings.LAB_SOLVE_SECONDS)
+                        experiment = services.solve_problem(request_scope(request), form.cleaned_data["name"],
+                            spec, form.cleaned_data["solver"], form.frontier_options(), draft)
                     finally:
                         SOLVE_SLOTS.release()
-                    # Solve before database writes, never inside a transaction.
-                    if draft is None:
-                        draft = Problem(owner=request.user, workspace=workspace_for(request))
-                    draft.name, draft.spec = form.cleaned_data["name"], spec
-                    draft.save()
-                    digest = hashlib.sha256(json.dumps({"spec": spec, "solver": form.cleaned_data["solver"],
-                        "options": result.get("settings", result.get("solver_options"))}, sort_keys=True, allow_nan=False).encode()).hexdigest()
-                    experiment = Experiment.objects.create(owner=request.user, workspace=workspace_for(request),
-                        problem=draft, name=draft.name, spec=spec, preview=preview, result=result, digest=digest,
-                        kind="frontier" if built.criteria else "single")
                     return redirect("result", pk=experiment.pk)
                 elif action == "save":
                     if draft is None:
@@ -192,9 +176,5 @@ def choose(request, pk):
     point = next((p for p in parent.result['points'] if p['id'] == index), None)
     if point is None or not point['result']['verified_optimal']:
         return HttpResponse('Choose a verified sampled point.', status=400)
-    child, _ = Experiment.objects.get_or_create(parent=parent, point_index=index, kind='chosen', defaults={
-        'owner': request.user, 'workspace': workspace_for(request), 'problem': parent.problem,
-        'name': f'{parent.name[:95]} · chosen point {index}', 'spec': point['solved_spec'],
-        'preview': point['preview'], 'result': {**point['result'], 'selection': point, 'criteria': parent.result['criteria']},
-        'digest': hashlib.sha256(json.dumps({'parent': parent.digest, 'point': point}, sort_keys=True, allow_nan=False).encode()).hexdigest()})
+    child = services.choose_point(request_scope(request), parent, index)
     return redirect('result', pk=child.pk)

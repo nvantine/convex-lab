@@ -39,7 +39,7 @@ code { font-size: .9em; overflow-wrap: anywhere; }
 .constraints li { padding-left: .4rem; margin: .5rem 0; }
 .metrics { display: grid; grid-template-columns: minmax(160px, 230px) 1fr; gap: .4rem; }
 .metrics dt { font-weight: 600; } .metrics dd { margin: 0; overflow-wrap: anywhere; }
-.chart { width: 100%; min-height: 320px; }
+.chart { width: 100%; min-height: 320px; overflow: hidden; }
 .login-form { max-width: 420px; }
 dialog { width: min(95vw, 1600px); max-width: 95vw; height: 90vh; padding: 1rem; }
 dialog::backdrop { background: #172338aa; }
