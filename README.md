@@ -120,6 +120,11 @@ and explicit exports, across website and CLI. Source revisions and completed
 results remain frozen. [Development notes](docs/cli-development-notes.md) describe
 limitations and follow-up ideas.
 
+See the [quant campaign archive](research/quant_campaign/README.md) for a real
+high-demand CLI study: eight datasets up to 154 assets, 676 validation trials,
+104 frozen final evaluations, known-answer numerical checks, and reproducible
+findings. It includes unsuccessful strategies and application failures.
+
 ## Code map
 
 - `core/parser.py`: explicit AST interpreter, declarations, shapes, domain checks,
