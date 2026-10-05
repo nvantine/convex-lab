@@ -19,8 +19,16 @@ workspace with Django and supports saved research and tests. The earlier user
 request adds resumable browser batch fetching, an optional scheduled Django data
 refresh command, and historical rolling re-optimization/rebalancing. Keep solves
 synchronous and avoid a general worker/queue. Preserve immutable experiments and per-session guest
-workspaces. Scope every record lookup and mutation by user AND workspace.
+workspaces. Scope private record lookups and mutations by user AND workspace;
+the read-only gallery exposes only explicitly published report outputs.
 Solves run outside database transactions using fresh CVXPY objects.
+
+For agent research, read docs/cli-agent-guide.md and use the CLI's JSON protocol.
+Save source revisions, tests, runs, reports, and findings through those commands
+so the owner can inspect them on the website. Use validation for exploration;
+final holdout use requires explicit confirmation and remains recorded on failure.
+Record reproducible bugs and future ideas in run notes and
+docs/cli-development-notes.md. Do not silently change research code or assumptions.
 
 Never print or commit secrets, private databases, or real account passwords.
 Use ignored .env/.local files and placeholder examples. Verify current official
