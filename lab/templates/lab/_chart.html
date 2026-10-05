@@ -1,0 +1,3 @@
+<button type="button" class="expand-chart" data-target="{{ chart.key }}">Expand chart</button>
+<div id="{{ chart.key }}" class="chart" data-chart="figure-{{ chart.key }}"></div>
+{% with script_id='figure-'|add:chart.key %}{{ chart.figure|json_script:script_id }}{% endwith %}

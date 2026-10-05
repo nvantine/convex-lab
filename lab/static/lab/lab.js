@@ -252,7 +252,10 @@ const dialog = document.querySelector("#chart-dialog");
 for (const button of document.querySelectorAll(".expand-chart")) {
   button.addEventListener("click", () => {
     const chart = document.getElementById(button.dataset.target);
-    const figure = JSON.parse(document.getElementById(chart.dataset.chart).textContent);
+    // Preserve the current zoom and visible traces when opening the dialog.
+    const figure = chart.data && chart.layout
+      ? JSON.parse(JSON.stringify({data: chart.data, layout: chart.layout}))
+      : JSON.parse(document.getElementById(chart.dataset.chart).textContent);
     dialog.showModal();
     Plotly.newPlot("expanded-chart", figure.data, {...figure.layout, height: undefined, autosize: true}, {responsive: true, displaylogo: false}).then(() => {
       document.querySelector("#expanded-chart").on("plotly_click", event => inspectPoint(chart, event));

@@ -1,7 +1,7 @@
 from django.urls import path
-from lab import views, data_views
+from lab import views, data_views, comparison_views
 
-urlpatterns = [path('fetches/<uuid:pk>/',data_views.fetch_progress,name='fetch_progress'),
+urlpatterns = [path("compare/",comparison_views.compare,name="compare"),path('fetches/<uuid:pk>/',data_views.fetch_progress,name='fetch_progress'),
                path('fetches/<uuid:pk>/batch/',data_views.fetch_batch,name='fetch_batch'),
                path('fetches/<uuid:pk>/action/',data_views.fetch_action,name='fetch_action'),
                path('datasets/',data_views.datasets,name='datasets'),

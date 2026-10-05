@@ -1,0 +1,28 @@
+{% extends 'lab/base.html' %}
+{% load static lab_tags %}
+{% block title %}Compare frozen results{% endblock %}
+{% block scripts %}<script defer src="{% static 'vendor/plotly.min.js' %}"></script>{% endblock %}
+{% block content %}
+<h1>Compare frozen results</h1>
+<p>Choose up to six saved experiments or historical evaluations. Selecting a record never solves again or opens unseen final prices.</p>
+<form method="get">
+<fieldset><legend>Optimization experiments</legend>
+{% for item in experiments %}<label><input type="checkbox" name="experiment" value="{{ item.pk }}" {% if item.pk in selected_experiments %}checked{% endif %}> {{ item.name }} · {{ item.created_at|date:'Y-m-d H:i:s' }} UTC</label>{% empty %}<p>No experiments saved yet.</p>{% endfor %}
+</fieldset>
+<fieldset><legend>Historical evaluations</legend>
+{% for item in evaluations %}<label><input type="checkbox" name="evaluation" value="{{ item.pk }}" {% if item.pk in selected_evaluations %}checked{% endif %}> {{ item.experiment.name }} · {{ item.get_window_display }} · {{ item.created_at|date:'Y-m-d H:i:s' }} UTC</label>{% empty %}<p>No historical evaluations saved yet.</p>{% endfor %}
+</fieldset><button>Compare selected</button></form>
+{% if records %}
+{% if differences %}<p class="notice">Different assumptions: {{ differences|join:', ' }}. Compare these before interpreting performance. Objective values with different expressions or units are not directly comparable.</p>{% else %}<p class="success">Displayed assumptions match. Numerical agreement alone does not establish a robust strategy.</p>{% endif %}
+<section><h2>Results and metrics</h2>
+<p class="table-hint"><small>Scroll comparison tables horizontally to see every selected result.</small></p>
+<p>Return, CAGR, volatility, drawdown and turnover are fractions; 0.08 is 8%. Unavailable values mean undefined or not applicable. Optimization values follow the units of their objectives.</p>
+<div class="table-scroll"><table class="compare-table"><thead><tr><th>Metric</th>{% for record in records %}<th>{{ forloop.counter }}. <a href="{% url record.link record.pk %}">{{ record.name }}</a><br><small>{{ record.summary }}</small></th>{% endfor %}</tr></thead>
+<tbody>{% for row in metrics %}<tr><th>{{ row.name }}</th>{% for value in row.values %}<td>{% if row.name == "Status" %}{{ value|default:"Unavailable" }}{% else %}{{ value|numeric_display }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></section>
+{% for chart in charts %}{% include 'lab/_chart.html' with chart=chart %}{% endfor %}
+<p>Historical charts share the date axis: zooming either panel updates both. A partial path retains its completed dates; charts do not fill missing dates. Decision vectors overlay only when their variable shape and bound asset order agree.</p>
+<section><h2>Assumptions and provenance</h2>
+<div class="table-scroll"><table class="compare-table"><thead><tr><th>Attribute</th>{% for record in records %}<th>{{ forloop.counter }}. {{ record.name }}<br><small>{{ record.summary }}</small></th>{% endfor %}</tr></thead><tbody>
+{% for row in rows %}<tr {% if row.different %}class="difference"{% endif %}><th>{{ row.name }}{% if row.different %} · DIFFERENT{% endif %}</th>{% for value in row.values %}<td>{% if value == None %}Unavailable{% else %}<details {% if row.different %}open{% endif %}><summary>Show value</summary><pre>{{ value|json_display }}</pre></details>{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></section>
+{% endif %}
+{% endblock %}
