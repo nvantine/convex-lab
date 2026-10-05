@@ -5,7 +5,25 @@
 {% block content %}
 <h1>{{ experiment.name }}</h1>
 <p>This experiment is a frozen snapshot. Editing the draft will not change it.</p>
+{% if experiment.parent %}<p><a href="{% url 'result' experiment.parent.pk %}">Return to frontier</a></p>{% endif %}
+{% if point %}
+<form method="post" action="{% url 'choose' experiment.pk %}">{% csrf_token %}<input type="hidden" name="point_index" value="{{ point.id }}"><button>Save as chosen solution</button></form>
+{% else %}
 <form method="post" action="{% url 'clone' experiment.pk %}">{% csrf_token %}<button>Clone into an editable problem</button></form>
+{% endif %}
+{% if experiment.result.selection %}
+<section><h2>How this point was produced</h2>
+<p>Method: <strong>{{ experiment.result.selection.generator.method }}</strong>. Weighted sums use the saved normalization; epsilon bounds use raw criterion units.</p>
+<div class="table-scroll"><table><thead><tr><th>Criterion</th><th>Direction</th><th>Value</th><th>Weight / epsilon bound</th></tr></thead><tbody>
+{% for criterion in criterion_rows %}<tr><th>{{ criterion.name }}</th><td>{{ criterion.sense }}</td><td>{{ criterion.value|number_display }}</td><td>{% if experiment.result.selection.generator.method == 'weighted' %}{{ criterion.weight|number_display }}{% elif experiment.result.selection.generator.method == 'epsilon' %}{% if criterion.primary %}Primary objective{% else %}{{ criterion.bound|number_display }}{% endif %}{% else %}Single-criterion anchor{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+<details><summary>Exact sampling settings</summary><pre>{{ experiment.result.selection.generator|json_display }}</pre></details>
+{% if experiment.result.selection.tie_break %}<p>A positive secondary objective resolved ties within a numerical slack of {{ experiment.result.selection.tie_slack|number_display }}. The solved math and duals below belong to that secondary problem.</p>
+<details><summary>Primary optimization before tie-breaking</summary>
+<div class="math" data-math>{{ experiment.result.selection.primary_preview.objective.latex }}</div>
+<p>Status: {{ experiment.result.selection.primary_result.status }} · Value: {{ experiment.result.selection.primary_result.optimal_value|number_display }}</p>
+<pre>{{ experiment.result.selection.tie_attempts|json_display }}</pre></details>{% endif %}
+</section>{% endif %}
 <div class="result-grid">
 <div>
 <section>
@@ -50,7 +68,7 @@
   <div class="table-scroll"><table class="duals-table">
     <thead><tr><th>Constraint</th><th>Expression</th><th>Dual value</th><th>Violation</th></tr></thead>
     <tbody>{% for constraint in experiment.result.constraints %}<tr>
-      <td>{{ constraint.number }}</td><td><code>{{ constraint.source }}</code></td>
+      <td>{{ constraint.number }}</td><td><div class="math" data-math>{{ constraint.latex }}</div></td>
       <td><pre>{{ constraint.dual|numeric_display }}</pre></td><td><pre>{{ constraint.violation|numeric_display }}</pre></td>
     </tr>{% empty %}<tr><td colspan="4">This problem has no explicit constraints.</td></tr>{% endfor %}</tbody>
   </table></div>

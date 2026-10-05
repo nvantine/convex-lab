@@ -13,10 +13,10 @@
   <h2>Saved experiments</h2>
   <p class="table-hint"><small>Scroll the table horizontally to see every column.</small></p>
   <div class="table-scroll"><table class="experiment-table">
-    <thead><tr><th>Problem</th><th>Solver status</th><th>Objective value</th><th>Saved</th></tr></thead>
+    <thead><tr><th>Problem</th><th>Status</th><th>Result / objective value</th><th>Saved</th></tr></thead>
     <tbody>{% for experiment in experiments %}<tr>
       <td><a href="{% url 'result' experiment.pk %}">{{ experiment.name }}</a></td>
-      <td>{{ experiment.result.status }}</td><td>{{ experiment.result.optimal_value|number_display }}</td>
+      <td>{{ experiment.result.status }}</td><td>{% if experiment.kind == 'frontier' %}{{ experiment.result.points|length }} nondominated samples{% else %}{{ experiment.result.optimal_value|number_display }}{% endif %}</td>
       <td>{{ experiment.created_at|date:'Y-m-d H:i' }} UTC</td>
     </tr>{% empty %}<tr><td colspan="4">No saved solves yet.</td></tr>{% endfor %}</tbody>
   </table></div>

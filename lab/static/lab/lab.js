@@ -10,16 +10,69 @@ for (const element of document.querySelectorAll(".math[data-math]")) {
   }
 }
 
+function equationEditor(input) {
+  if (document.querySelector('#id_source_language')?.value !== 'latex' || input.dataset.enhanced) return;
+  input.dataset.enhanced = 'true';
+  const rendered = document.createElement('button');
+  rendered.type = 'button';
+  rendered.className = 'equation-render';
+  rendered.setAttribute('aria-label', `Edit ${input.id === 'id_constraints' ? 'constraints' : 'equation'} LaTeX`);
+  const hint = document.createElement('small');
+  hint.textContent = 'Click the equation to edit LaTeX.';
+  input.after(rendered, hint);
+  const display = () => {
+    rendered.replaceChildren();
+    try {
+      for (const source of input.value.split('\n').filter(s => s.trim())) {
+        const line = document.createElement('div');
+        katex.render(source, line, {displayMode: true, trust: false, throwOnError: true});
+        rendered.append(line);
+      }
+      if (!rendered.childNodes.length) rendered.textContent = 'Click to enter an equation';
+      input.hidden = true;
+      rendered.hidden = false;
+      hint.hidden = false;
+    } catch (error) {
+      input.hidden = false;
+      rendered.hidden = true;
+      hint.hidden = false;
+      hint.textContent = `Typesetting preview: ${error.message}`;
+    }
+  };
+  rendered.addEventListener('click', () => {
+    rendered.hidden = true;
+    input.hidden = false;
+    hint.textContent = 'Edit the source, then click outside to render. Check math & DCP validates meaning.';
+    input.focus();
+  });
+  input.addEventListener('blur', display);
+  input.addEventListener('input', () => {
+    // Keep focus while typing; show the live preview underneath the source.
+    try {
+      rendered.replaceChildren();
+      for (const source of input.value.split('\n').filter(s => s.trim())) {
+        const line = document.createElement('div');
+        katex.render(source, line, {displayMode: true, trust: false, throwOnError: true});
+        rendered.append(line);
+      }
+      rendered.hidden = false;
+      hint.textContent = 'Live typesetting preview; Check math & DCP validates meaning.';
+    } catch (error) { rendered.hidden = true; hint.textContent = `Typesetting preview: ${error.message}`; }
+  });
+  display();
+}
+
 const problemForm = document.querySelector("#problem-form");
 if (problemForm) {
-  const state = {variables: [], parameters: []};
+  const state = {variables: [], parameters: [], criteria: []};
   let sequence = 0;
   const rawErrors = new Set();
   const fields = {
     variables: ["name", "shape", "domain", "meaning", "units"],
-    parameters: ["name", "value", "domain", "meaning", "units"]
+    parameters: ["name", "value", "domain", "meaning", "units"],
+    criteria: ["name", "sense", "expression", "meaning", "units"]
   };
-  const labels = {name: "Name", shape: "Shape (JSON)", domain: "Domain", meaning: "Meaning", units: "Units", value: "Value (JSON)"};
+  const labels = {name: "Name", shape: "Shape (JSON)", domain: "Domain", meaning: "Meaning", units: "Units", value: "Value (JSON)", sense: "Direction", expression: "Criterion expression"};
   const sources = {};
   const serialize = () => {
     for (const kind of Object.keys(state)) sources[kind].value = JSON.stringify(state[kind], null, 2);
@@ -33,7 +86,7 @@ if (problemForm) {
     problemForm.prepend(note);
   };
   const readRows = () => {
-    const next = {variables: [], parameters: []};
+    const next = {variables: [], parameters: [], criteria: []};
     for (const kind of Object.keys(next)) {
       for (const row of document.querySelectorAll(`#${kind}-editor .declaration`)) {
         const value = {};
@@ -65,26 +118,27 @@ if (problemForm) {
           label.htmlFor = id;
           label.textContent = labels[field];
           let input;
-          if (field === "domain") {
+          if (["domain", "sense"].includes(field)) {
             input = document.createElement("select");
-            for (const domain of ["free", "nonneg", "nonpos", "symmetric", "PSD"]) {
+            for (const domain of (field === "sense" ? ["minimize", "maximize"] : ["free", "nonneg", "nonpos", "symmetric", "PSD"])) {
               const option = document.createElement("option");
               option.value = option.textContent = domain;
               input.append(option);
             }
           } else {
-            input = document.createElement(field === "value" ? "textarea" : "input");
-            if (field === "value") input.rows = 3;
+            input = document.createElement(["value", "expression"].includes(field) ? "textarea" : "input");
+            if (["value", "expression"].includes(field)) input.rows = 3;
           }
           input.id = id;
           input.dataset.field = field;
-          input.value = ["shape", "value"].includes(field) ? JSON.stringify(declaration[field]) : (declaration[field] || (field === "domain" ? "free" : ""));
+          input.value = ["shape", "value"].includes(field) ? JSON.stringify(declaration[field]) : (declaration[field] || (field === "domain" ? "free" : field === "sense" ? "minimize" : ""));
           wrapper.append(label, input);
           inputs.append(wrapper);
+          if (field === "expression") equationEditor(input);
         }
         const actions = document.createElement("div");
         actions.className = "actions";
-        for (const action of ["Remove", kind === "parameters" ? "Make variable" : "Make parameter"]) {
+        for (const action of (kind === "criteria" ? ["Remove"] : ["Remove", kind === "parameters" ? "Make variable" : "Make parameter"])) {
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = action;
@@ -126,6 +180,15 @@ if (problemForm) {
       if (!Array.isArray(state[kind]) || state[kind].some(row => !row || typeof row !== "object" || Array.isArray(row))) throw new Error("Declarations must be a list of objects.");
     } catch (error) { ready = false; showError(`Fix the ${kind} JSON and resubmit: ${error.message}`); }
   }
+  const mode = document.querySelector('#id_mode');
+  const toggleMode = () => {
+    document.querySelector('#single-editor').hidden = mode.value === 'multi';
+    document.querySelector('#multi-editor').hidden = mode.value !== 'multi';
+  };
+  if (!mode.value) mode.value = 'single';
+  mode.addEventListener('change', toggleMode);
+  toggleMode();
+  for (const input of document.querySelectorAll('.equation-input')) equationEditor(input);
   if (ready) {
     render();
     for (const source of Object.values(sources)) {
@@ -147,7 +210,7 @@ if (problemForm) {
         try {
           readRows();
           const kind = button.dataset.kind;
-          state[kind].push({name: "", [kind === "variables" ? "shape" : "value"]: kind === "variables" ? [] : 0, domain: "free", meaning: "", units: ""});
+          state[kind].push(kind === "criteria" ? {name: "", sense: "minimize", expression: "", meaning: "", units: ""} : {name: "", [kind === "variables" ? "shape" : "value"]: kind === "variables" ? [] : 0, domain: "free", meaning: "", units: ""});
           serialize();
           render();
         } catch (error) { showError(`Check declaration JSON: ${error.message}`); }
@@ -165,9 +228,19 @@ if (problemForm) {
   }
 }
 
+function inspectPoint(chart, event) {
+  const index = event.points?.[0]?.customdata;
+  if (!chart.dataset.pointBase || !Number.isInteger(index)) return;
+  const url = `${chart.dataset.pointBase}${index}/`;
+  const note = document.querySelector('#point-selection');
+  if (note) note.textContent = `Opening point ${index}: decision values and exact sampling settings.`;
+  window.location.assign(url);
+}
 for (const chart of document.querySelectorAll("[data-chart]")) {
   const figure = JSON.parse(document.getElementById(chart.dataset.chart).textContent);
-  Plotly.newPlot(chart, figure.data, figure.layout, {responsive: true, displaylogo: false});
+  Plotly.newPlot(chart, figure.data, figure.layout, {responsive: true, displaylogo: false}).then(() => {
+    chart.on("plotly_click", event => inspectPoint(chart, event));
+  });
 }
 const dialog = document.querySelector("#chart-dialog");
 for (const button of document.querySelectorAll(".expand-chart")) {
@@ -175,7 +248,9 @@ for (const button of document.querySelectorAll(".expand-chart")) {
     const chart = document.getElementById(button.dataset.target);
     const figure = JSON.parse(document.getElementById(chart.dataset.chart).textContent);
     dialog.showModal();
-    Plotly.newPlot("expanded-chart", figure.data, {...figure.layout, height: undefined, autosize: true}, {responsive: true, displaylogo: false});
+    Plotly.newPlot("expanded-chart", figure.data, {...figure.layout, height: undefined, autosize: true}, {responsive: true, displaylogo: false}).then(() => {
+      document.querySelector("#expanded-chart").on("plotly_click", event => inspectPoint(chart, event));
+    });
   });
 }
 document.querySelector("#close-chart")?.addEventListener("click", () => {

@@ -32,6 +32,7 @@ class Limits:
 class Expression:
     value: cp.Expression
     latex: str
+    row: bool = False
 
 
 @dataclass
@@ -152,7 +153,7 @@ class Parser:
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
             a = child(node.operand)
             return Expression(-a.value if isinstance(node.op, ast.USub) else a.value,
-                              ("-" if isinstance(node.op, ast.USub) else "+") + r"\left(" + a.latex + r"\right)")
+                              ("-" if isinstance(node.op, ast.USub) else "+") + r"\left(" + a.latex + r"\right)", a.row)
         if isinstance(node, ast.BinOp):
             a, b = child(node.left), child(node.right)
             if isinstance(node.op, ast.Add):
@@ -166,7 +167,7 @@ class Parser:
             elif isinstance(node.op, ast.MatMult):
                 value = a.value @ b.value
                 left = a.latex
-                if a.value.ndim == 1 and b.value.ndim >= 1 and not left.endswith(r"^{\top}"):
+                if a.value.ndim == 1 and b.value.ndim >= 1 and not a.row:
                     left = rf"\left({left}\right)^{{\top}}"
                 latex = rf"\left({left}\right) \left({b.latex}\right)"
             elif isinstance(node.op, ast.Div):
@@ -177,7 +178,10 @@ class Parser:
                 value, latex = cp.square(a.value), f"\\left({a.latex}\\right)^2"
             else:
                 raise ProblemError("Allowed operators: +, -, *, /, @, and **2. Use @ for matrix products; * is elementwise.")
-            return Expression(value, latex)
+            row = False
+            if value.ndim == 1:
+                row = a.value.ndim == 1 if isinstance(node.op, ast.MatMult) else (a.row or b.row)
+            return Expression(value, latex, row)
         if isinstance(node, ast.Subscript):
             a = child(node.value)
             index = self.index(node.slice)
@@ -243,7 +247,7 @@ class Parser:
                 if not x.is_constant() and not matrix.is_constant():
                     raise ProblemError("quad_form cannot optimize its vector and matrix together: the joint expression is not DCP. Fix one as a parameter.")
             value = ATOMS[name](*(p.value for p in parts), **keywords)
-        return Expression(value, atom_math(name, parts, keywords))
+        return Expression(value, atom_math(name, parts, keywords), not parts[0].row if name == 'transpose' and value.ndim == 1 else False)
 
 
 def build_problem(spec, limits=None):

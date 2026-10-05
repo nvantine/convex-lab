@@ -1,0 +1,45 @@
+{% extends 'lab/base.html' %}
+{% load static lab_tags %}
+{% block title %}{{ experiment.name }} · Pareto exploration{% endblock %}
+{% block scripts %}<script defer src="{% static 'vendor/plotly.min.js' %}"></script>{% endblock %}
+{% block content %}
+<h1>{{ experiment.name }}</h1>
+<p>This is a frozen frontier experiment. <strong id="frontier-status">{{ experiment.result.status }}</strong> · {{ experiment.result.points|length }} verified nondominated samples · {{ experiment.result.solver_calls }} solver calls.</p>
+<form method="post" action="{% url 'clone' experiment.pk %}">{% csrf_token %}<button>Clone into an editable problem</button></form>
+<section><h2>What Pareto optimal means</h2>
+<p>A solution is Pareto optimal if improving one criterion requires worsening another. Each arrow indicates the desired direction. Shading in two dimensions marks outcomes dominated by a displayed point. Dotted segments interpolate between samples; points on those segments have not been solved.</p>
+<p>A strictly positive weighted sum produces a Pareto optimum when solved globally. For convex problems, supporting nonnegative weights can recover every Pareto point; zero weights may leave ties, so we refine them with a positive secondary objective. Nonconvex fronts can have unsupported points that weighted sums miss. A finite grid only samples the frontier.</p>
+<p>Shown points pass solver and constraint checks and are nondominated among the computed candidates at a normalized tolerance of {{ experiment.result.dominance_tolerance }}. This is numerical evidence, not a proof of the complete frontier.</p>
+{% if experiment.result.status == 'incomplete' %}<p class="notice">The request budget ended. Completed samples are saved; this sweep is incomplete.</p>{% endif %}
+<p>Click a plotted point or use Inspect in the table to see its variables, exact weights or epsilon bounds, solved mathematics, and duals. Save the inspected point as your chosen solution.</p>
+</section>
+<section><h2>Tradeoff views</h2>
+{% if experiment.result.criteria|length == 3 %}<p>Rotate the 3D plot. The optional interpolation is a visual guide between samples, not additional solved portfolios; toggle it in the legend if available.</p>{% endif %}
+{% if experiment.result.criteria|length > 3 %}<p>Parallel coordinates show all criteria; brush axes to filter visually. Pairwise projections can conceal dominance in other criteria. The 3D plot colors points by the fourth criterion.</p>{% endif %}
+{% for chart in charts %}
+<button type="button" class="expand-chart" data-target="{{ chart.key }}">Expand chart</button>
+<div class="chart-scroll"><div id="{{ chart.key }}" class="chart frontier-chart" data-chart="figure-{{ chart.key }}" data-point-base="{% url 'result' experiment.pk %}points/"></div></div>
+{% with script_id='figure-'|add:chart.key %}{{ chart.figure|json_script:script_id }}{% endwith %}
+{% endfor %}
+<p id="point-selection" role="status">No point selected.</p>
+</section>
+<section><h2>Criterion ranges and anchors</h2>
+<p>These ranges cover saved nondominated samples. Anchor optima come from optimizing each criterion alone; they are not estimates of the exact global worst Pareto value. Tied anchors are refined within an explicit numerical slack.</p>
+<p class="table-hint"><small>Scroll horizontally to see all criteria.</small></p><div class="table-scroll"><table><thead><tr><th>Criterion</th><th>Single-criterion optimum</th><th>Sample minimum</th><th>Sample maximum</th></tr></thead><tbody>
+{% for row in experiment.result.ranges %}<tr><th>{{ row.name }}</th><td>{{ row.anchor_optimum|number_display }}</td><td>{{ row.sample_min|number_display }}</td><td>{{ row.sample_max|number_display }}</td></tr>{% endfor %}
+</tbody></table></div>
+<details><summary>Anchor decision values and numerical evidence</summary><pre>{{ experiment.result.anchors|json_display }}</pre></details>
+</section>
+<section><h2>Sampled solutions</h2><p class="table-hint"><small>Scroll horizontally to see all criteria.</small></p><div class="table-scroll"><table>
+<thead><tr><th>Point</th>{% for criterion in experiment.result.criteria %}<th>{{ criterion.name }} · {{ criterion.sense }}</th>{% endfor %}<th>Produced by</th><th>Details</th></tr></thead><tbody>
+{% for point in experiment.result.points %}<tr><th>{{ point.id }}</th>{% for value in point.values %}<td>{{ value|number_display }}</td>{% endfor %}<td>{{ point.generator.method }}</td><td><a href="{% url 'point' experiment.pk point.id %}">Inspect point {{ point.id }}</a></td></tr>{% endfor %}
+</tbody></table></div></section>
+{% include 'lab/_math.html' %}
+<details><summary>Reproducibility details</summary>
+<p class="digest">{{ experiment.digest }}</p>
+<h3>Sampling settings</h3><pre>{{ experiment.result.settings|json_display }}</pre>
+<h3>Normalization</h3><pre>{{ experiment.result.normalization|json_display }}</pre>
+<h3>Attempt log (including infeasible epsilon combinations)</h3><pre>{{ experiment.result.attempts|json_display }}</pre>
+<h3>Frozen specification</h3><pre>{{ experiment.spec|json_display }}</pre>
+</details>
+{% endblock %}

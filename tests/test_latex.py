@@ -103,3 +103,21 @@ def test_slices_roundtrip_without_python_looking_text():
         # Build/solve to validate index shapes through the actual whitelist.
         changed = {**spec, 'objective': {'sense': 'minimize', 'expression': converted}}
         assert build_problem(changed).problem.is_dcp()
+
+
+def test_matrix_product_row_orientation_is_preserved_in_display():
+    spec = get_preset('min-variance')
+    spec['parameters'].append({'name':'v', 'value':[1,2]})
+    for expression in ('transpose(w) @ Sigma @ v', 'w @ Sigma @ v', 'transpose(w) @ v'):
+        spec['objective']['expression'] = expression
+        latex = expression_source(expression, spec)
+        assert latex.count(r'^{\top}') == 1
+        parsed = to_expression(latex, shapes(spec))
+        assert build_problem({**spec, 'objective':{'sense':'minimize','expression':parsed}}).problem.is_dcp()
+
+
+def test_juxtaposed_declared_letters_and_exact_names():
+    assert to_expression(r'\|Ax-b\|_2^2', {'A':(3,2),'x':(2,),'b':(3,)}) == 'sum_squares(A @ x - b)'
+    assert to_expression('Ax', {'A':(3,2),'x':(2,), 'Ax':(3,)}) == 'Ax'
+    with pytest.raises(LatexError, match='transpose'):
+        to_expression('xy', {'x':(2,), 'y':(2,)})

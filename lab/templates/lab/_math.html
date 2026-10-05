@@ -3,18 +3,27 @@
   <h2 id="math-heading">The problem you defined</h2>
   <p class="{% if preview.is_dcp %}success{% else %}notice{% endif %}"><strong>DCP verdict: {% if preview.is_dcp %}passes{% else %}not recognized{% endif %}</strong></p>
   <p>DCP checks curvature rules. A pass does not guarantee feasibility or a bounded optimum. A failure may require a different expression for the same mathematics.</p>
+  {% if preview.criteria %}
+  <h3>Criteria</h3>
+  {% for criterion in preview.criteria %}
+  <h4>{{ criterion.name }} · {{ criterion.sense }}</h4>
+  <div class="math" data-math>{{ criterion.latex }}</div>
+  <p>{{ criterion.meaning }} <small>{{ criterion.units }} · Curvature: {{ criterion.curvature }}</small></p>
+  {% endfor %}
+  {% else %}
   <h3>Objective</h3>
   <div class="math" data-math>{{ preview.objective.latex }}</div>
   <p><small>Curvature: {{ preview.objective.curvature }} · Sign: {{ preview.objective.sign }}</small></p>
+  {% endif %}
   <h3>Numbered constraints</h3>
   <ol class="constraints">{% for constraint in preview.constraints %}
-    <li><div class="math" data-math>{{ constraint.latex }}</div><code>{{ constraint.source }}</code></li>
+    <li><div class="math" data-math>{{ constraint.latex }}</div></li>
     {% empty %}<li>No constraints: the variable domains and objective determine the problem.</li>{% endfor %}
   </ol>
   {% if preview.diagnostics %}
   <h3>Why the DCP check failed</h3>
   <ul class="diagnostics">{% for item in preview.diagnostics %}<li>
-    <code>{{ item.expression }}</code> — {{ item.rule }}
+    <div class="math" data-math>{{ item.latex }}</div>{{ item.rule }}
     <small>Curvature: {{ item.curvature }} · Sign: {{ item.sign }}</small>
   </li>{% endfor %}</ul>
   {% endif %}
@@ -23,7 +32,7 @@
   <div class="table-scroll"><table class="declarations-table">
     <thead><tr><th>Name</th><th>Role / shape</th><th>Meaning / units</th><th>Domain</th><th>Value</th></tr></thead>
     <tbody>{% for item in preview.declarations %}<tr>
-      <td><code>{{ item.name }}</code></td>
+      <td><span class="math" data-math>{{ item.latex_name }}</span></td>
       <td>{{ item.kind }}<br>{{ item.shape }}</td>
       <td>{{ item.meaning|default:'Not specified' }}<br><small>{{ item.units }}</small></td>
       <td>{{ item.domain }}</td>

@@ -142,3 +142,17 @@ def test_seed_reproducibility_and_every_multicriterion_latex_roundtrip():
         b = pareto.run_frontier(converted, {'samples':10})
         assert [p['generator'] for p in a['points']] == [p['generator'] for p in b['points']]
         np.testing.assert_allclose([p['values'] for p in a['points']], [p['values'] for p in b['points']], atol=1e-5)
+
+
+def test_plot_types_and_optional_mesh_are_explicit():
+    from core.charts import frontier_charts
+    for key, types in [('return-risk',['scatter']), ('return-risk-turnover',['scatter3d','mesh3d']),
+                       ('four-criteria',['scatter3d','parcoords','splom'])]:
+        result = pareto.run_frontier(get_preset(key), {'samples':12})
+        charts = frontier_charts(result)
+        traces = [trace for chart in charts for trace in chart['figure']['data']]
+        assert [t['type'] for t in traces] == types
+        if key == 'return-risk-turnover':
+            mesh = traces[1]
+            assert mesh['visible'] == 'legendonly' and mesh['showlegend']
+            assert mesh['name'] == 'Interpolation (not solved)'

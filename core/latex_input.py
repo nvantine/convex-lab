@@ -67,7 +67,13 @@ class LatexParser:
             match = TOKEN.match(source, position)
             if not match:
                 raise LatexError(f'Unsupported LaTeX near {source[position:position+20]!r}. See the notation reference.')
-            self.tokens.append(match.group())
+            token = match.group()
+            # Conventional Ax means A times x when A and x are declared letters.
+            # An exact declared identifier always wins over this interpretation.
+            if token.isalpha() and len(token) > 1 and token not in names and all(char in names for char in token):
+                self.tokens.extend(token)
+            else:
+                self.tokens.append(token)
             position = match.end()
         if len(self.tokens) > 1000:
             raise LatexError('LaTeX expression exceeds the token budget.')

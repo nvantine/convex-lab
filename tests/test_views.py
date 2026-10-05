@@ -191,3 +191,123 @@ def test_initial_json_fields_are_arrays_not_encoded_strings(client, owner):
     form = response.context["form"]
     assert isinstance(json.loads(form["variables"].value()), list)
     assert isinstance(json.loads(form["parameters"].value()), list)
+
+
+def multi_data(key='return-risk', **changes):
+    from lab.forms import initial_from_spec
+    values = initial_from_spec('Frontier test', get_preset(key), 'expression')
+    values.update({'action':'solve', 'samples':8, 'normalize':'on'})
+    for field in ('variables','parameters','criteria'):
+        values[field] = json.dumps(values[field])
+    values.update(changes)
+    return {k:v for k,v in values.items() if v is not None}
+
+
+@pytest.mark.parametrize('method', ['weighted','epsilon'])
+def test_frontier_inspect_choose_clone_and_repeat_selection(client, owner, method):
+    client.force_login(owner)
+    response = client.post('/problems/new/', multi_data(method=method))
+    assert response.status_code == 302
+    frontier = Experiment.objects.get(kind='frontier')
+    assert client.get(response.url).status_code == 200
+    point = frontier.result['points'][0]
+    url = reverse('point', args=[frontier.pk, point['id']])
+    rendered = client.get(url)
+    assert rendered.status_code == 200
+    assert b'How this point was produced' in rendered.content
+    assert b'Save as chosen solution' in rendered.content
+    assert client.get(reverse('choose', args=[frontier.pk])).status_code == 405
+    assert client.post(reverse('choose', args=[frontier.pk]), {'point_index':999}).status_code == 400
+    assert client.post(reverse('choose', args=[frontier.pk]), {'point_index':'bad'}).status_code == 400
+    assert client.get(reverse('point', args=[frontier.pk,999])).status_code == 404
+    chosen = client.post(reverse('choose', args=[frontier.pk]), {'point_index':point['id']})
+    assert chosen.status_code == 302
+    assert client.get(chosen.url).status_code == 200
+    assert client.post(reverse('choose', args=[frontier.pk]), {'point_index':point['id']}).url == chosen.url
+    child = Experiment.objects.get(kind='chosen')
+    assert child.parent == frontier
+    assert child.spec == point['solved_spec']
+    assert child.result['selection']['generator'] == point['generator']
+    with pytest.raises(ValidationError):
+        child.save()
+    clone = client.post(reverse('clone', args=[child.pk]))
+    assert client.get(clone.url).status_code == 200
+    cloned_draft = Problem.objects.exclude(pk=frontier.problem_id).get()
+    assert 'criteria' not in cloned_draft.spec
+    assert cloned_draft.spec == child.spec
+
+
+@pytest.mark.parametrize('key', ['return-risk-turnover','four-criteria','least-squares-tradeoff'])
+def test_additional_multicriterion_views(client, owner, key):
+    client.force_login(owner)
+    assert b'DCP verdict: passes' in client.get('/problems/new/', {'preset':key}).content
+    response = client.post('/problems/new/', multi_data(key))
+    assert response.status_code == 302
+    assert client.get(response.url).status_code == 200
+
+
+def test_frontier_scoped_to_guest_workspace(guest):
+    first, other = Client(), Client()
+    first.force_login(guest)
+    other.force_login(guest)
+    response = first.post('/problems/new/', multi_data())
+    assert response.status_code == 302
+    frontier = Experiment.objects.get()
+    assert other.get(response.url).status_code == 404
+    assert other.get(reverse('point', args=[frontier.pk,0])).status_code == 404
+    assert other.post(reverse('choose', args=[frontier.pk]), {'point_index':0}).status_code == 404
+
+
+def test_latex_default_edit_source_and_notation_switch(client, owner):
+    client.force_login(owner)
+    response = client.get('/problems/new/')
+    assert response.context['form']['source_language'].value() == 'latex'
+    assert r'\Sigma' in response.context['form']['expression'].value()
+    data = post_data(action='to_latex')
+    converted = client.post('/problems/new/', data)
+    form = converted.context['form']
+    assert form['source_language'].value() == 'latex'
+    data.update(source_language='latex', expression=form['expression'].value(), constraints=form['constraints'].value(), action='save')
+    draft_response = client.post('/problems/new/', data)
+    assert draft_response.status_code == 302
+    draft = Problem.objects.get()
+    assert draft.spec['input']['objective']['expression'] == data['expression']
+    assert client.get(draft_response.url).context['form']['expression'].value() == data['expression']
+    data['action'] = 'to_expression'
+    converted = client.post(draft_response.url, data)
+    assert converted.context['form']['source_language'].value() == 'expression'
+    assert 'quad_form' in converted.context['form']['expression'].value()
+    data.update(action='solve', expression=r'\input{secrets}')
+    bad = client.post('/problems/new/', data)
+    assert bad.status_code == 200
+    assert b'LaTeX input' in bad.content
+    assert Experiment.objects.count() == 0
+
+
+def test_multicriterion_validation_messages(client, owner):
+    client.force_login(owner)
+    response = client.post('/problems/new/', multi_data(samples=51))
+    assert b'Sample budget must be' in response.content
+    assert Experiment.objects.count() == 0
+    response = client.post('/problems/new/', multi_data(criteria='[]'))
+    assert b'Declare between 2' in response.content
+    spec = get_preset('return-risk')
+    spec['criteria'][1]['expression'] = 'square(w[0])'
+    response = client.post('/problems/new/', multi_data(criteria=json.dumps(spec['criteria'])))
+    assert b'DCP rules failed' in response.content
+    assert b'Criterion 2 failed' in response.content
+    assert Experiment.objects.count() == 0
+
+
+def test_old_snapshot_math_rerendered_without_altering_saved_evidence(client, owner):
+    client.force_login(owner)
+    response = client.post('/problems/new/', post_data())
+    experiment = Experiment.objects.get()
+    old_preview = deepcopy(experiment.preview)
+    old_preview['objective']['latex'] = 'old Python looking math'
+    Experiment.objects.filter(pk=experiment.pk).update(preview=old_preview)
+    rendered = client.get(response.url)
+    assert b'old Python looking math' not in rendered.content
+    assert r'\Sigma'.encode() in rendered.content
+    experiment.refresh_from_db()
+    assert experiment.preview == old_preview
