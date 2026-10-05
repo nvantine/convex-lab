@@ -33,7 +33,7 @@ def convert_spec(spec, language, limits=None):
     return result
 
 
-def editable_spec(spec, language):
+def editable_spec(spec, language, limits=None):
     result = deepcopy(spec)
     if spec.get('input', {}).get('language') == language:
         for field in ('objective', 'criteria', 'constraints'):
@@ -43,8 +43,8 @@ def editable_spec(spec, language):
     if language == 'latex':
         if result.get('criteria'):
             for item in result['criteria']:
-                item['expression'] = expression_source(item['expression'], spec)
+                item['expression'] = expression_source(item['expression'], spec, limits)
         else:
-            result['objective']['expression'] = expression_source(result['objective']['expression'], spec)
-        result['constraints'] = [expression_source(source, spec) for source in spec['constraints']]
+            result['objective']['expression'] = expression_source(result['objective']['expression'], spec, limits)
+        result['constraints'] = [expression_source(source, spec, limits) for source in spec['constraints']]
     return result

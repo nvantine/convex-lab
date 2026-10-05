@@ -1,6 +1,7 @@
 {% load lab_tags %}
 <section class="math-panel" aria-labelledby="math-heading">
   <h2 id="math-heading">The problem you defined</h2>
+  {% if form %}<p><small>This is the last checked specification. After editing, Check math &amp; DCP to update this section; the live previews above show your current input.</small></p>{% endif %}
   <p class="{% if preview.is_dcp %}success{% else %}notice{% endif %}"><strong>DCP verdict: {% if preview.is_dcp %}passes{% else %}not recognized{% endif %}</strong></p>
   <p>DCP checks curvature rules. A pass does not guarantee feasibility or a bounded optimum. A failure may require a different expression for the same mathematics.</p>
   {% if preview.criteria %}

@@ -4,6 +4,12 @@
 for (const element of document.querySelectorAll(".math[data-math]")) {
   try {
     katex.render(element.textContent, element, {displayMode: true, trust: false, throwOnError: true});
+    if (element.scrollWidth > element.clientWidth + 1) {
+      const hint = document.createElement('small');
+      hint.className = 'math-scroll-hint';
+      hint.textContent = 'Scroll horizontally to read the whole equation.';
+      element.after(hint);
+    }
   } catch (error) {
     element.classList.add("math-error");
     element.textContent = `Math rendering failed: ${error.message}`;

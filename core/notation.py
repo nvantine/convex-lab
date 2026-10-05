@@ -55,13 +55,14 @@ def atom_math(name, parts, keywords):
     raise ValueError(f'No mathematical renderer for {name}')
 
 
-def expression_source(source, spec):
+def expression_source(source, spec, limits=None):
     """Render editable symbolic LaTeX without freezing scalar parameter values."""
     from core.parser import Parser, Limits, build_problem
     seed = {**spec, 'objective': {'sense': 'minimize', 'expression': '0'}, 'constraints': []}
     seed.pop('criteria', None)
-    built = build_problem(seed)
-    parser = Parser(built.names, {}, Limits())
+    limits = limits or Limits()
+    built = build_problem(seed, limits)
+    parser = Parser(built.names, {}, limits)
     node = parser.tree(source)
     if isinstance(node, ast.Compare):
         a = parser.expression(node.left)

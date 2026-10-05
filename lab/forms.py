@@ -45,8 +45,8 @@ class ProblemForm(forms.Form):
                 **{field: data[field] for field in ('weights', 'epsilon', 'scales')}}
 
 
-def initial_from_spec(name, spec, language='latex'):
-    source = editable_spec(spec, language)
+def initial_from_spec(name, spec, language='latex', limits=None):
+    source = editable_spec(spec, language, limits)
     objective = source.get('objective', {'sense': 'minimize', 'expression': ''})
     return {'name': name, 'variables': source['variables'], 'parameters': source['parameters'],
             'source_language': language, 'mode': 'multi' if source.get('criteria') else 'single',

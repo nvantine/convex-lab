@@ -2,6 +2,7 @@
 import hashlib
 import json
 from threading import BoundedSemaphore
+from types import SimpleNamespace
 
 import numpy as np
 import plotly.graph_objects as go
@@ -17,7 +18,6 @@ from core.presets import PRESETS, get_preset
 from core.solve import solve
 from core.pareto import run_frontier
 from core.charts import frontier_charts
-from types import SimpleNamespace
 from lab.forms import ProblemForm, initial_from_spec
 from lab.models import Experiment, Problem
 from lab.workspaces import scoped, workspace_for
@@ -45,7 +45,7 @@ def editor(request, pk=None):
         return HttpResponse("Unknown preset.", status=404)
     name = draft.name if draft else PRESETS[preset][0]
     spec = draft.spec if draft else get_preset(preset)
-    form = ProblemForm(request.POST if request.method == "POST" else None, initial=initial_from_spec(name, spec))
+    form = ProblemForm(request.POST if request.method == "POST" else None, initial=initial_from_spec(name, spec, limits=limits()))
     preview = None
     if request.method == "POST" and form.is_valid():
         action = request.POST.get("action", "preview")
@@ -58,7 +58,7 @@ def editor(request, pk=None):
                 preview = built.preview()
                 if action in {'to_latex', 'to_expression'}:
                     language = 'latex' if action == 'to_latex' else 'expression'
-                    initial = initial_from_spec(form.cleaned_data['name'], spec, language)
+                    initial = initial_from_spec(form.cleaned_data['name'], spec, language, limits())
                     for field in ('solver', 'method', 'samples', 'normalize', 'primary', 'weights', 'epsilon', 'scales', 'seed'):
                         initial[field] = form.cleaned_data[field]
                     form = ProblemForm(initial=initial)

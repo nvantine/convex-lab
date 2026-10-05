@@ -121,3 +121,16 @@ def test_juxtaposed_declared_letters_and_exact_names():
     assert to_expression('Ax', {'A':(3,2),'x':(2,), 'Ax':(3,)}) == 'Ax'
     with pytest.raises(LatexError, match='transpose'):
         to_expression('xy', {'x':(2,), 'y':(2,)})
+
+
+def test_notation_conversion_respects_owner_limits():
+    from core.input import convert_spec, editable_spec
+    from core.parser import Limits
+    spec = get_preset('min-variance')
+    spec['variables'][0]['shape'] = [5001]
+    spec['parameters'] = []
+    spec['objective']['expression'] = 'sum_squares(w)'
+    spec['constraints'] = ['sum(w) == 1']
+    limits = Limits(variable_entries=6000)
+    source = editable_spec(spec, 'latex', limits)
+    assert build_problem(convert_spec(source, 'latex', limits), limits).problem.is_dcp()
