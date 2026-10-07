@@ -21,7 +21,7 @@ from lab.forms import ProblemForm, initial_from_spec
 from lab.models import Experiment, Problem, Evaluation, Dataset
 from core.data import estimates_edited
 from lab.request_limits import SOLVE_SLOTS
-from lab.workspaces import scoped, workspace_for, request_scope
+from lab.workspaces import scoped, workspace_for, request_scope, ensure_guest_datasets
 from lab import services
 
 
@@ -30,6 +30,7 @@ limits = services.limits
 
 @login_required
 def home(request):
+    ensure_guest_datasets(request)
     return render(request, "lab/home.html", {"problems": scoped(Problem, request),
                   "experiments": scoped(Experiment, request), "evaluations": scoped(Evaluation, request), "is_guest": not request.user.is_staff})
 

@@ -30,7 +30,8 @@ The command never prints the password and rerunning it does not reset it.
 `.local/`, `.env`, databases, and secrets are ignored by Git.
 To give every new guest browser session copies of selected owner price snapshots,
 set `LAB_GUEST_STARTER_DATASET_IDS` in `.env` to comma-separated dataset IDs.
-Guests see the copies on their Datasets page; their saved work remains isolated.
+Guests receive the copies when they reach Home or Datasets after login; their
+saved work remains isolated.
 
 Synthetic examples need no API keys. Alpaca reuses the existing private
 `../portfolio-lab/.env` by default; choosing yfinance requires no keys.

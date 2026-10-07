@@ -38,6 +38,9 @@ def ensure_guest_datasets(request):
     """Give each guest session its own copies of the configured frozen snapshots."""
     if request.user.username != settings.GUEST_USERNAME or not settings.LAB_GUEST_STARTER_DATASET_IDS:
         return
+    configured = [str(value) for value in settings.LAB_GUEST_STARTER_DATASET_IDS]
+    if request.session.get("guest_starter_dataset_ids") == configured:
+        return
     from lab.models import Dataset
 
     workspace = workspace_for(request)
@@ -54,3 +57,4 @@ def ensure_guest_datasets(request):
             defaults={"name": source.name, "source": source.source,
                       "prices": source.prices, "provenance": source.provenance},
         )
+    request.session["guest_starter_dataset_ids"] = configured
