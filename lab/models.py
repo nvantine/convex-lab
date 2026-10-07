@@ -63,6 +63,8 @@ class Dataset(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [models.UniqueConstraint(fields=['owner', 'workspace', 'digest'],
+                                               name='one_dataset_snapshot_per_workspace')]
 
     def save(self, *args, **kwargs):
         if type(self).objects.filter(pk=self.pk).exists():

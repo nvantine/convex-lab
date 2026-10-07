@@ -19,7 +19,7 @@ from lab.forms import DatasetForm, TrainingForm, EvaluationForm
 from lab.models import Dataset, Evaluation, Experiment, Problem, FetchRequest, ResearchRun
 from lab import fetching
 from lab.request_limits import SOLVE_SLOTS
-from lab.workspaces import scoped, workspace_for, request_scope
+from lab.workspaces import scoped, workspace_for, request_scope, ensure_guest_datasets
 from lab import services
 
 DEFAULT_SYMBOLS = 'SPY, QQQ, IWM, EFA, EEM, AGG, TLT, LQD, HYG, GLD, VNQ, XLE, XLK, XLV, XLF, DBC'
@@ -44,6 +44,7 @@ def data_fingerprint(payload, provenance):
 
 @login_required
 def datasets(request):
+    ensure_guest_datasets(request)
     end = last_completed_day()
     form = DatasetForm(request.POST if request.method=='POST' else None, initial={
         'name':'Market history', 'source':'alpaca','symbols':DEFAULT_SYMBOLS, 'start':end-timedelta(days=365*5), 'end':end})

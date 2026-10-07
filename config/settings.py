@@ -1,6 +1,7 @@
 """Small local configuration; production requires an explicit private secret."""
 import os
 import secrets
+import uuid
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
@@ -54,6 +55,12 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "login"
 GUEST_USERNAME = "guest"
+try:
+    LAB_GUEST_STARTER_DATASET_IDS = tuple(
+        uuid.UUID(value.strip()) for value in os.getenv("LAB_GUEST_STARTER_DATASET_IDS", "").split(",") if value.strip()
+    )
+except ValueError as error:
+    raise ImproperlyConfigured("LAB_GUEST_STARTER_DATASET_IDS must contain comma-separated dataset UUIDs.") from error
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_SECURE = not DEBUG

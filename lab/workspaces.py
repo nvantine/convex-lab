@@ -32,3 +32,25 @@ def workspace_for(request):
 
 def scoped(model, request):
     return model.objects.filter(owner=request.user, workspace=workspace_for(request))
+
+
+def ensure_guest_datasets(request):
+    """Give each guest session its own copies of the configured frozen snapshots."""
+    if request.user.username != settings.GUEST_USERNAME or not settings.LAB_GUEST_STARTER_DATASET_IDS:
+        return
+    from lab.models import Dataset
+
+    workspace = workspace_for(request)
+    starters = list(Dataset.objects.filter(
+        pk__in=settings.LAB_GUEST_STARTER_DATASET_IDS, owner__is_staff=True,
+    ).values_list("id", "digest"))
+    existing = set(Dataset.objects.filter(
+        owner=request.user, workspace=workspace, digest__in=[digest for _, digest in starters],
+    ).values_list("digest", flat=True))
+    missing_ids = [dataset_id for dataset_id, digest in starters if digest not in existing]
+    for source in Dataset.objects.filter(pk__in=missing_ids):
+        Dataset.objects.get_or_create(
+            owner=request.user, workspace=workspace, digest=source.digest,
+            defaults={"name": source.name, "source": source.source,
+                      "prices": source.prices, "provenance": source.provenance},
+        )
